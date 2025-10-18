@@ -1,7 +1,7 @@
 python_dotenv
 python-telegram-bot
 supabase
-google-generativeai
+google-genai
 pydantic
 pyjwt
 flask
