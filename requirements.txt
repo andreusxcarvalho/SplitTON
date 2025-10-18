@@ -5,6 +5,7 @@ google-genai
 pydantic
 pyjwt
 flask
+flask-cors
 python-multipart
 requests
 gunicorn

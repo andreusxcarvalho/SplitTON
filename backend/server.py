@@ -2,12 +2,14 @@ import os
 from datetime import datetime
 from supabase import create_client
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 from bot import start_bot
 from dotenv import load_dotenv
 
 load_dotenv()
 
 app = Flask(__name__)
+CORS(app)
 
 SUPABASE_URL = os.getenv("PROJECT_URL")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("DATABASE_API_KEY")
