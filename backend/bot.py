@@ -3,7 +3,7 @@ import os
 import tempfile
 import logging
 from typing import List, Optional
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 from supabase import create_client
 from aiagent import set_api_key, process_transaction, ParsedTransactions, TransactionInfo
@@ -176,10 +176,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
         "👋 *Welcome to SplitAI Bot*\n\n"
         "Send a receipt (image + caption) or text describing a payment and I'll record transactions for you.\n\n"
-        "If you don't have an account yet, open the mini app and register.\n\n"
-        f"Open Mini App: {MINIAPP_URL}"
+        "If you don't have an account yet, open the mini app and register."
     )
-    keyboard = [[InlineKeyboardButton("Open Mini App", url=MINIAPP_URL)]]
+    # Use web_app parameter to open as proper Telegram Mini App (not browser link)
+    keyboard = [[InlineKeyboardButton("Open Mini App", web_app=WebAppInfo(url=MINIAPP_URL))]]
     await context.bot.send_message(chat_id=chat_id, text=text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
 
 # ---------------- MESSAGE HANDLER ----------------
