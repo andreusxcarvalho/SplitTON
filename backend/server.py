@@ -32,16 +32,7 @@ def register_user():
     print(f"REGISTER: {email}")
     if not email:
         return jsonify({"error": "Missing email"}), 400
-    response = supabase.auth.sign_in_with_otp(
-    {
-        "email": email,
-        "options": {
-            "email_redirect_to": f"{MINIAPP_URL}/stats",
-        },
-    }
-)
-    # Supabase response object doesn't always have a clear .error, checking for successful status is complex
-    # Assuming OTP link is sent if no exception is raised
+    response = supabase.auth.sign_in_with_otp({"email": email})
     return jsonify({"message": "OTP sent to email"}), 200
 
 # 2) Verify user
