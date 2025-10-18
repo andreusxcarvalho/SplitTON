@@ -3,7 +3,7 @@ import os
 from typing import List, Union, Optional
 from enum import Enum
 from pydantic import BaseModel, Field
-from google import genai
+from google.generativeai import genai
 
 
 # Global API key - can be set via set_api_key() or defaults to env variable

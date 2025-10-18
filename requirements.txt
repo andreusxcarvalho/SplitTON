@@ -6,3 +6,5 @@ pydantic
 pyjwt
 flask
 python-multipart
+requests
+gunicorn
