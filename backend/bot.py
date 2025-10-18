@@ -30,19 +30,21 @@ MINIAPP_URL = os.getenv("MINIAPP_URL")
 # ---------------- HELPERS ----------------
 def get_profile_by_telegram_id(telegram_id: int) -> Optional[dict]:
     """Return profile row for a given telegram_id, or None if not found."""
-    resp = supabase.table("profiles").select("*").eq("telegram_id", telegram_id).limit(1).execute()
-    if resp.error:
-        logger.error("Supabase error fetching profile: %s", resp.error)
+    try:
+        resp = supabase.table("profiles").select("*").eq("telegram_id", telegram_id).limit(1).execute()
+        return resp.data[0] if resp.data else None
+    except Exception as e:
+        logger.error("Supabase error fetching profile: %s", e)
         return None
-    return resp.data[0] if resp.data else None
 
 def get_friends_for_owner(owner_profile_id: str) -> List[dict]:
     """Return list of friend rows for owner (owner_id is profile.id)."""
-    resp = supabase.table("friends").select("*").eq("user_id", owner_profile_id).execute()
-    if resp.error:
-        logger.error("Supabase error fetching friends: %s", resp.error)
+    try:
+        resp = supabase.table("friends").select("*").eq("user_id", owner_profile_id).execute()
+        return resp.data or []
+    except Exception as e:
+        logger.error("Supabase error fetching friends: %s", e)
         return []
-    return resp.data or []
 
 def resolve_name_to_profile_id(owner_profile_id: str, name: str, telegram_from_id: int) -> Optional[str]:
     """
@@ -58,12 +60,13 @@ def resolve_name_to_profile_id(owner_profile_id: str, name: str, telegram_from_i
         return profile["id"] if profile else None
 
     # Find friend by nickname for this owner
-    resp = supabase.table("friends").select("friend_user_id, nickname").eq("user_id", owner_profile_id).ilike("nickname", name).limit(1).execute()
-    if resp.error:
-        logger.error("Supabase error resolving friend nickname: %s", resp.error)
+    try:
+        resp = supabase.table("friends").select("friend_user_id, nickname").eq("user_id", owner_profile_id).ilike("nickname", name).limit(1).execute()
+        if resp.data:
+            return resp.data[0]["friend_user_id"]
+    except Exception as e:
+        logger.error("Supabase error resolving friend nickname: %s", e)
         return None
-    if resp.data:
-        return resp.data[0]["friend_user_id"]
 
     # As a fallback, try match by profiles.telegram_id if name looks like an integer
     try:
@@ -129,12 +132,13 @@ def insert_transaction_and_children(creator_profile_id: str,
         "description": txn_info.item or None
     }
 
-    tx_res = supabase.table("transactions").insert(txn_payload).select("id").execute()
-    if tx_res.error:
-        logger.error("Error inserting transaction: %s", tx_res.error)
+    try:
+        tx_res = supabase.table("transactions").insert(txn_payload).select("id").execute()
+        txn_row = tx_res.data[0]
+        txn_id = txn_row["id"]
+    except Exception as e:
+        logger.error("Error inserting transaction: %s", e)
         raise RuntimeError("DB error inserting transaction")
-    txn_row = tx_res.data[0]
-    txn_id = txn_row["id"]
 
     # Insert participant row (one payer -> one payee)
     part_payload = {
@@ -144,11 +148,13 @@ def insert_transaction_and_children(creator_profile_id: str,
         "amount": float(txn_info.amount),
         "status": "pending"
     }
-    part_res = supabase.table("transaction_participants").insert(part_payload).select("id").execute()
-    if part_res.error:
-        logger.error("Error inserting participant: %s", part_res.error)
+    
+    try:
+        part_res = supabase.table("transaction_participants").insert(part_payload).select("id").execute()
+        participant_id = part_res.data[0]["id"]
+    except Exception as e:
+        logger.error("Error inserting participant: %s", e)
         raise RuntimeError("DB error inserting participant")
-    participant_id = part_res.data[0]["id"]
 
     # Insert item record (linked to participant)
     item_payload = {
@@ -157,9 +163,11 @@ def insert_transaction_and_children(creator_profile_id: str,
         "item_price": float(txn_info.amount),
         "category": txn_info.category.value if hasattr(txn_info, "category") else None
     }
-    item_res = supabase.table("transaction_items").insert(item_payload).execute()
-    if item_res.error:
-        logger.error("Error inserting transaction item: %s", item_res.error)
+    
+    try:
+        item_res = supabase.table("transaction_items").insert(item_payload).execute()
+    except Exception as e:
+        logger.error("Error inserting transaction item: %s", e)
         raise RuntimeError("DB error inserting transaction item")
 
 # ---------------- COMMAND HANDLERS ----------------
