@@ -8,6 +8,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppI
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, ConversationHandler, filters
 from supabase import create_client
 from aiagent import set_api_key, process_transaction, ParsedTransactions, TransactionInfo
+from speech_to_text import speech_to_text
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -350,8 +351,43 @@ async def handle_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception:
                 pass
 
+        # PHOTO WITHOUT CAPTION
+        elif message.photo and not message.caption:
+            await message.reply_text("Please add a caption to your image describing the transaction.")
+            return
+
+        # VOICE MESSAGE (convert to text)
+        elif message.voice or message.audio:
+            # Download voice/audio file
+            if message.voice:
+                file_obj = message.voice
+                file_ext = ".ogg"
+            else:
+                file_obj = message.audio
+                file_ext = ".mp3"
+            
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=file_ext)
+            await file_obj.get_file().download_to_drive(tmp.name)
+            tmp.close()
+            
+            # Convert speech to text
+            try:
+                transcribed_text = speech_to_text(tmp.name)
+                parsed = process_transaction("text", transcribed_text, possible_friends)
+                source_type = "voice"
+            except Exception as e:
+                logger.error(f"Error transcribing audio: {e}")
+                await message.reply_text("❌ Could not transcribe audio. Please try again.")
+                return
+            finally:
+                # cleanup local file
+                try:
+                    os.unlink(tmp.name)
+                except Exception:
+                    pass
+
         else:
-            await message.reply_text("Please send either plain text or an image with a caption (caption is required for images).")
+            # Silently ignore other message types (videos, stickers, etc.)
             return
 
         # If AI returned no transactions
