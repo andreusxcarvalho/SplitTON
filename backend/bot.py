@@ -367,7 +367,8 @@ async def handle_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 file_ext = ".mp3"
             
             tmp = tempfile.NamedTemporaryFile(delete=False, suffix=file_ext)
-            await file_obj.get_file().download_to_drive(tmp.name)
+            file = await file_obj.get_file()
+            await file.download_to_drive(tmp.name)
             tmp.close()
             
             # Convert speech to text
