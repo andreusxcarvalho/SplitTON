@@ -25,7 +25,7 @@ set_api_key(GOOGLE_GENAI_KEY)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-MINIAPP_URL = os.getenv("MINIAPP_URL", "https://t.me/spliton_test_bot?start=miniapp")
+MINIAPP_URL = os.getenv("MINIAPP_URL")
 
 # ---------------- HELPERS ----------------
 def get_profile_by_telegram_id(telegram_id: int) -> Optional[dict]:
