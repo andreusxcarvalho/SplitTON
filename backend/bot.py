@@ -335,7 +335,7 @@ async def handle_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
             photo = message.photo[-1]
             tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg")
             file = await photo.get_file()
-            await file.download_to_path(tmp.name)
+            await file.download(tmp.name)
             tmp.close()
             # upload to supabase storage
             dest_filename = f"{owner_profile_id}/{os.path.basename(tmp.name)}"
@@ -369,7 +369,7 @@ async def handle_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             tmp = tempfile.NamedTemporaryFile(delete=False, suffix=file_ext)
             file = await file_obj.get_file()
-            await file.download_to_path(tmp.name)
+            await file.download(tmp.name)
             tmp.close()
             
             # Convert speech to text
