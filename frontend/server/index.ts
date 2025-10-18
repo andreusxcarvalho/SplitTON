@@ -54,8 +54,11 @@ app.use((req, res, next) => {
   }
 
   // Force safe IPv4 binding to avoid ENOTSUP on macOS
-  const port = Number(process.env.PORT) || 5080;
-  app.listen(port, "127.0.0.1", () => {
-    log(`Server running at http://127.0.0.1:${port}`);
+  const PORT = Number(process.env.PORT) || 5080;
+
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`[express] Server running at http://0.0.0.0:${PORT}`);
   });
+  
+  
 })();
