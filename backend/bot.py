@@ -4,7 +4,7 @@ import tempfile
 import logging
 import uuid
 from typing import List, Optional
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo, Bot
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, ConversationHandler, filters
 from supabase import create_client
 from aiagent import set_api_key, process_transaction, ParsedTransactions, TransactionInfo
@@ -33,6 +33,9 @@ AWAITING_NICKNAME = 1
 
 # Global bot application (for sending messages outside handlers)
 bot_app = None
+
+# Create a standalone Bot instance for sending notifications from server.py
+notification_bot = Bot(token=TELEGRAM_TOKEN)
 
 # ---------------- HELPERS ----------------
 def get_profile_by_telegram_id(telegram_id: int) -> Optional[dict]:
@@ -256,11 +259,6 @@ async def send_friend_request_notification(telegram_id: int,
     Shows requester email with Accept/Reject buttons.
     """
     try:
-        global bot_app
-        if not bot_app:
-            logger.error("Bot app not initialized")
-            return
-            
         message_text = (
             f"👥 *Friend Request*\n\n"
             f"{requester_email} wants to add you as a friend.\n\n"
@@ -274,7 +272,7 @@ async def send_friend_request_notification(telegram_id: int,
             ]
         ]
         
-        await bot_app.bot.send_message(
+        await notification_bot.send_message(
             chat_id=telegram_id,
             text=message_text,
             parse_mode="Markdown",
