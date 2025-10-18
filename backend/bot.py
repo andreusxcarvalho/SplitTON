@@ -6,7 +6,7 @@ from typing import List, Optional
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 from supabase import create_client
-from ai_agent import set_api_key, process_transaction, ParsedTransactions, TransactionInfo
+from aiagent import set_api_key, process_transaction, ParsedTransactions, TransactionInfo
 from dotenv import load_dotenv
 
 load_dotenv()
