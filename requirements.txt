@@ -1,0 +1,8 @@
+python_dotenv
+python-telegram-bot
+supabase
+google-generativeai
+pydantic
+pyjwt
+flask
+python-multipart

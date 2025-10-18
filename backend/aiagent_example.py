@@ -1,7 +1,7 @@
 import aiagent
 
 # Step 1: Set your Google Generative AI API key
-aiagent.set_api_key("AIzaSyDkSnaLwAoSmNcYZ25xvoA5D6yGlG6wPe8")
+aiagent.set_api_key(os.getenv("GEMINI_API_KEY"))
 
 # Alternative: Set via environment variable
 # export GOOGLE_GENAI_API_KEY="your-api-key"
