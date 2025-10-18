@@ -133,7 +133,7 @@ def insert_transaction_and_children(creator_profile_id: str,
     }
 
     try:
-        tx_res = supabase.table("transactions").insert(txn_payload).select("id").execute()
+        tx_res = supabase.table("transactions").insert(txn_payload).execute()
         txn_row = tx_res.data[0]
         txn_id = txn_row["id"]
     except Exception as e:
@@ -150,7 +150,7 @@ def insert_transaction_and_children(creator_profile_id: str,
     }
     
     try:
-        part_res = supabase.table("transaction_participants").insert(part_payload).select("id").execute()
+        part_res = supabase.table("transaction_participants").insert(part_payload).execute()
         participant_id = part_res.data[0]["id"]
     except Exception as e:
         logger.error("Error inserting participant: %s", e)
