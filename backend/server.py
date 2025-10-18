@@ -281,6 +281,37 @@ def retrieve_image(transaction_id):
     txn = resp.data[0]
     return jsonify({"source_path": txn.get("source_path"), "source_type": txn.get("source_type")})
 
+# 10) Payment confirmations
+@app.route("/payment_notification", methods=["POST"])
+def send_payment_sent_notification():
+    """Send notification when payment has been sent."""
+    data = request.json
+    user_id = data.get("user_id")
+    amount = data.get("amount")
+    
+    if not user_id or amount is None:
+        return jsonify({"error": "Missing user_id or amount"}), 400
+    
+    try:
+        # Import payment function
+        from payments import collect_payment
+        import asyncio
+        
+        # Create payment link using async function
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        pay_url = loop.run_until_complete(
+            collect_payment(user_id=user_id, amount=amount)
+        )
+        loop.close()
+        
+        print(f"✅ Created payment link for user {user_id}, amount {amount}: {pay_url}")
+        return jsonify({"payment_url": pay_url}), 200
+        
+    except Exception as e:
+        print(f"❌ Payment link creation error: {str(e)}")
+        return jsonify({"error": f"Failed to create payment link: {str(e)}"}), 500
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
