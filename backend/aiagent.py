@@ -3,7 +3,7 @@ import os
 from typing import List, Union, Optional
 from enum import Enum
 from pydantic import BaseModel, Field
-from google.generativeai import genai
+from google.generativeai.client import Client as genai_Client
 
 
 # Global API key - can be set via set_api_key() or defaults to env variable
@@ -21,12 +21,12 @@ def _get_api_key() -> str:
     if _API_KEY:
         return _API_KEY
     
-    env_key = os.getenv("GOOGLE_GENAI_API_KEY")
+    env_key = os.getenv("GEMINI_API_KEY")
     if env_key:
         return env_key
     
     raise ValueError(
-        "API key not set. Use set_api_key('your-key') or set GOOGLE_GENAI_API_KEY environment variable."
+        "API key not set. Use set_api_key('your-key') or set GEMINI_API_KEY environment variable."
     )
 
 
@@ -97,7 +97,7 @@ def parse_text_input(
     # Preprocess: replace pronouns with "You"
     processed_text = _preprocess_input(text)
     
-    client = genai.Client(api_key=_get_api_key())
+    client = genai_Client(api_key=_get_api_key())
     
     friends_str = ", ".join(possible_friends)
     prompt = f"""Extract all transactions from this text (written from the user's perspective): "{processed_text}"
@@ -179,7 +179,7 @@ def parse_image_input(
     elif image_path.lower().endswith(".webp"):
         mime_type = "image/webp"
     
-    client = genai.Client(api_key=_get_api_key())
+    client = genai_Client(api_key=_get_api_key())
     
     friends_str = ", ".join(possible_friends)
     prompt = f"""Analyze this receipt/payment proof image with the following caption (written from user's perspective): "{processed_caption}"
