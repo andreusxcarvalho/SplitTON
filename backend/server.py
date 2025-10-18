@@ -40,12 +40,7 @@ def verify_user():
     else:
         return jsonify({"error": "Invalid OTP"}), 400
 
-# Run Telegram Bot in another thread
-def run_bot():
-    start_bot()
-
 
 if __name__ == "__main__":
-    threading.Thread(target=run_bot, daemon=True).start()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
