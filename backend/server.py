@@ -135,12 +135,17 @@ def add_friend(user_id):
     
     try:
         # Look up friend's profile_id by email in profiles table
-        friend_resp = supabase.table("profiles").select("id").eq("email", friend_email).limit(1).execute()
+        friend_resp = supabase.table("profiles").select("id, telegram_id, email").eq("email", friend_email).limit(1).execute()
         
         if not friend_resp.data:
             return jsonify({"error": "Friend not found. Make sure they have registered first."}), 404
         
         friend_user_id = friend_resp.data[0]["id"]
+        friend_telegram_id = friend_resp.data[0].get("telegram_id")
+
+        # Get requester's email for the notification
+        requester_resp = supabase.table("profiles").select("email").eq("id", user_id).limit(1).execute()
+        requester_email = requester_resp.data[0]["email"] if requester_resp.data else "Someone"
 
         # Insert friend relationship
         payload = {"user_id": user_id, "friend_user_id": friend_user_id, "nickname": nickname}
@@ -149,7 +154,34 @@ def add_friend(user_id):
         if not resp.data:
             return jsonify({"error": "Failed to add friend"}), 500
         
+        friend_record_id = resp.data[0]["id"]
+        
         print(f"✅ Friend added: {nickname} ({friend_email}) for user {user_id}")
+        
+        # Send Telegram notification to the friend
+        if friend_telegram_id and friend_telegram_id != 0:
+            from bot import send_friend_request_notification
+            import asyncio
+            
+            try:
+                # Run async notification in sync context
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                loop.run_until_complete(
+                    send_friend_request_notification(
+                        telegram_id=friend_telegram_id,
+                        requester_email=requester_email,
+                        friend_record_id=friend_record_id,
+                        requester_user_id=user_id
+                    )
+                )
+                loop.close()
+                print(f"✅ Sent friend request notification to telegram_id: {friend_telegram_id}")
+            except Exception as notif_error:
+                print(f"⚠️ Failed to send Telegram notification: {str(notif_error)}")
+        else:
+            print(f"⚠️ Friend has no telegram_id, skipping notification")
+        
         return jsonify({"message": "Friend added"}), 200
         
     except Exception as e:

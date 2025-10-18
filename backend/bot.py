@@ -5,7 +5,7 @@ import logging
 import uuid
 from typing import List, Optional
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, ConversationHandler, filters
 from supabase import create_client
 from aiagent import set_api_key, process_transaction, ParsedTransactions, TransactionInfo
 from dotenv import load_dotenv
@@ -27,6 +27,12 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 MINIAPP_URL = os.getenv("MINIAPP_URL")
+
+# Conversation states for friend request
+AWAITING_NICKNAME = 1
+
+# Global bot application (for sending messages outside handlers)
+bot_app = None
 
 # ---------------- HELPERS ----------------
 def get_profile_by_telegram_id(telegram_id: int) -> Optional[dict]:
@@ -240,6 +246,42 @@ async def send_notification_to_party(context: ContextTypes.DEFAULT_TYPE,
         )
     except Exception as e:
         logger.error("Error sending notification to telegram_id %s: %s", telegram_id, e)
+
+async def send_friend_request_notification(telegram_id: int, 
+                                           requester_email: str,
+                                           friend_record_id: str,
+                                           requester_user_id: str) -> None:
+    """
+    Send friend request notification to a user.
+    Shows requester email with Accept/Reject buttons.
+    """
+    try:
+        global bot_app
+        if not bot_app:
+            logger.error("Bot app not initialized")
+            return
+            
+        message_text = (
+            f"👥 *Friend Request*\n\n"
+            f"{requester_email} wants to add you as a friend.\n\n"
+            f"Please set a name for them:"
+        )
+        
+        keyboard = [
+            [
+                InlineKeyboardButton("✓ Accept", callback_data=f"accept_friend:{friend_record_id}:{requester_user_id}"),
+                InlineKeyboardButton("✗ Reject", callback_data=f"reject_friend:{friend_record_id}")
+            ]
+        ]
+        
+        await bot_app.bot.send_message(
+            chat_id=telegram_id,
+            text=message_text,
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    except Exception as e:
+        logger.error("Error sending friend request notification to telegram_id %s: %s", telegram_id, e)
 
 # ---------------- COMMAND HANDLERS ----------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -546,17 +588,177 @@ async def reject_transaction_callback(update: Update, context: ContextTypes.DEFA
         logger.exception("Error rejecting transaction: %s", e)
         await query.edit_message_text(f"❌ Error: {str(e)}")
 
+async def accept_friend_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle acceptance of a friend request. Prompts for nickname."""
+    query = update.callback_query
+    await query.answer()
+    
+    # Parse callback data: accept_friend:<friend_record_id>:<requester_user_id>
+    callback_data = query.data
+    if not callback_data.startswith("accept_friend:"):
+        await query.edit_message_text("❌ Invalid callback data")
+        return ConversationHandler.END
+    
+    parts = callback_data.split(":")
+    if len(parts) != 3:
+        await query.edit_message_text("❌ Invalid callback data format")
+        return ConversationHandler.END
+    
+    friend_record_id = parts[1]
+    requester_user_id = parts[2]
+    
+    # Store in context for later use
+    context.user_data["pending_friend_accept"] = {
+        "friend_record_id": friend_record_id,
+        "requester_user_id": requester_user_id,
+        "chat_id": query.message.chat_id,
+        "message_id": query.message.message_id
+    }
+    
+    # Ask for nickname
+    await query.edit_message_text(
+        "✓ *Friend request accepted!*\n\n"
+        "Please reply with a nickname for this person:",
+        parse_mode="Markdown"
+    )
+    
+    return AWAITING_NICKNAME
+
+async def reject_friend_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle rejection of a friend request. Deletes the friendship."""
+    query = update.callback_query
+    await query.answer()
+    
+    # Parse callback data: reject_friend:<friend_record_id>
+    callback_data = query.data
+    if not callback_data.startswith("reject_friend:"):
+        await query.edit_message_text("❌ Invalid callback data")
+        return
+    
+    friend_record_id = callback_data.split(":", 1)[1]
+    
+    try:
+        # Delete the friend record
+        resp = supabase.table("friends").delete().eq("id", friend_record_id).execute()
+        
+        # Get requester info to notify them
+        if resp.data:
+            # Notification could be added here if needed
+            pass
+        
+        await query.edit_message_text("✗ *Friend request rejected*", parse_mode="Markdown")
+        
+    except Exception as e:
+        logger.exception("Error rejecting friend request: %s", e)
+        await query.edit_message_text(f"❌ Error: {str(e)}")
+
+async def receive_nickname(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Receive nickname for accepted friend and create bidirectional friendship."""
+    message = update.message
+    nickname = message.text.strip()
+    
+    if not nickname:
+        await message.reply_text("Please provide a valid nickname.")
+        return AWAITING_NICKNAME
+    
+    # Get stored data
+    pending_data = context.user_data.get("pending_friend_accept")
+    if not pending_data:
+        await message.reply_text("❌ Session expired. Please try again.")
+        return ConversationHandler.END
+    
+    friend_record_id = pending_data["friend_record_id"]
+    requester_user_id = pending_data["requester_user_id"]
+    accepter_telegram_id = message.from_user.id
+    
+    try:
+        # Get accepter's profile
+        accepter_profile = get_profile_by_telegram_id(accepter_telegram_id)
+        if not accepter_profile:
+            await message.reply_text("❌ You don't have a profile. Please register first.")
+            return ConversationHandler.END
+        
+        accepter_user_id = accepter_profile["id"]
+        
+        # Create reverse friendship (accepter -> requester)
+        reverse_payload = {
+            "user_id": accepter_user_id,
+            "friend_user_id": requester_user_id,
+            "nickname": nickname
+        }
+        
+        reverse_resp = supabase.table("friends").insert(reverse_payload).execute()
+        
+        if not reverse_resp.data:
+            await message.reply_text("❌ Failed to create friendship")
+            return ConversationHandler.END
+        
+        # Get requester's email for confirmation message
+        requester_resp = supabase.table("profiles").select("email").eq("id", requester_user_id).limit(1).execute()
+        requester_email = requester_resp.data[0]["email"] if requester_resp.data else "Unknown"
+        
+        # Send confirmation
+        await message.reply_text(
+            f"✅ *Friendship established!*\n\n"
+            f"You are now friends with {requester_email}\n"
+            f"Nickname: {nickname}",
+            parse_mode="Markdown"
+        )
+        
+        # Notify the requester
+        requester_telegram_id = get_telegram_id_from_profile_id(requester_user_id)
+        if requester_telegram_id:
+            accepter_email = accepter_profile.get("email", "Someone")
+            await context.bot.send_message(
+                chat_id=requester_telegram_id,
+                text=f"✅ *{accepter_email} accepted your friend request!*",
+                parse_mode="Markdown"
+            )
+        
+        # Cleanup
+        del context.user_data["pending_friend_accept"]
+        
+    except Exception as e:
+        logger.exception("Error creating friendship: %s", e)
+        await message.reply_text(f"❌ Error: {str(e)}")
+        return ConversationHandler.END
+    
+    return ConversationHandler.END
+
+async def cancel_nickname(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Cancel nickname input."""
+    await update.message.reply_text("❌ Cancelled")
+    if "pending_friend_accept" in context.user_data:
+        del context.user_data["pending_friend_accept"]
+    return ConversationHandler.END
+
 def start_bot():
     """Start the Telegram bot (for use in server.py or standalone testing)."""
+    global bot_app
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+    bot_app = app  # Store globally for send_friend_request_notification
     
     # Command handlers
     app.add_handler(CommandHandler("start", start))
+    
+    # Conversation handler for friend nickname input
+    friend_conv_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(accept_friend_callback, pattern="^accept_friend:")],
+        states={
+            AWAITING_NICKNAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_nickname)]
+        },
+        fallbacks=[CommandHandler("cancel", cancel_nickname)],
+        per_message=False,
+        per_chat=True,
+        per_user=True
+    )
+    app.add_handler(friend_conv_handler)
     
     # Callback query handlers
     app.add_handler(CallbackQueryHandler(confirm_all_callback, pattern="^confirm_all:"))
     app.add_handler(CallbackQueryHandler(cancel_all_callback, pattern="^cancel_all:"))
     app.add_handler(CallbackQueryHandler(reject_transaction_callback, pattern="^reject_txn:"))
+    app.add_handler(CallbackQueryHandler(reject_friend_callback, pattern="^reject_friend:"))
     
     # Message handler (must be last to avoid conflicts)
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_input))
