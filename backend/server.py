@@ -14,6 +14,8 @@ SUPABASE_SERVICE_ROLE_KEY = os.getenv("DATABASE_API_KEY")
 
 supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
+MINIAPP_URL = os.getenv("MINIAPP_URL")
+
 # ===== Health Check API endpoint =====
 # 0) Health Check Endpoint (NEW)
 @app.route("/health", methods=["GET"])
@@ -27,9 +29,17 @@ def health_check():
 def register_user():
     data = request.json
     email = data.get("email")
+    print(f"REGISTER: {email}")
     if not email:
         return jsonify({"error": "Missing email"}), 400
-    auth = supabase.auth.sign_in_with_otp({"email": email})
+    response = supabase.auth.sign_in_with_otp(
+    {
+        "email": email,
+        "options": {
+            "email_redirect_to": f"{MINIAPP_URL}/stats",
+        },
+    }
+)
     # Supabase response object doesn't always have a clear .error, checking for successful status is complex
     # Assuming OTP link is sent if no exception is raised
     return jsonify({"message": "OTP sent to email"}), 200
@@ -52,36 +62,57 @@ def verify_user():
 # 3) Stats
 @app.route("/stats/<user_id>", methods=["GET"])
 def stats(user_id):
+    # Get all transaction_items where user is either payer or payee
     resp = supabase.table("transaction_items")\
-        .select("item_price, category, participant:participant_id")\
+        .select("item_price, category, participant:participant_id(payer_id, payee_id, transaction_id)")\
         .execute()
-    if not resp.data and resp.data is not None:
-        return jsonify({"error": "Failed to retrieve transaction items"}), 500
+    
+    if not resp.data:
+        return jsonify({}), 200
+    
     # Filter only user's transactions
     stats_data = {}
     for item in resp.data:
-        # Assuming participant contains payer or payee
-        cat = item.get("category", "Other")
-        stats_data[cat] = stats_data.get(cat, 0) + float(item.get("item_price", 0))
+        participant = item.get("participant")
+        if not participant:
+            continue
+        
+        # Only include if user is payer OR payee
+        if participant.get("payer_id") == user_id or participant.get("payee_id") == user_id:
+            cat = item.get("category", "Other")
+            stats_data[cat] = stats_data.get(cat, 0) + float(item.get("item_price", 0))
+    
     return jsonify(stats_data)
 
 # 4) List friends
 @app.route("/friends/<user_id>", methods=["GET"])
 def list_friends(user_id):
-    resp = supabase.table("friends").select("*").eq("user_id", user_id).execute()
+    resp = supabase.table("friends").select("id, nickname, friend_user_id").eq("user_id", user_id).execute()
+    
     if resp.data is None:
         return jsonify({"error": "Failed to retrieve friends"}), 500
-    return jsonify(resp.data)
+    
+    # Return formatted data matching frontend expectations
+    friends = [{"id": str(f["id"]), "nickname": f["nickname"]} for f in resp.data]
+    return jsonify(friends)
 
 # 5) Add friend
 @app.route("/friends/<user_id>", methods=["POST"])
 def add_friend(user_id):
     data = request.json
-    friend_name = data.get("nickname")
-    friend_user_id = data.get("friend_user_id")
-    if not friend_name or not friend_user_id:
-        return jsonify({"error": "Missing nickname or friend_user_id"}), 400
-    payload = {"user_id": user_id, "friend_user_id": friend_user_id, "nickname": friend_name}
+    friend_email = data.get("email")
+    nickname = data.get("nickname")
+    if not friend_email or not nickname:
+        return jsonify({"error": "Missing email or nickname"}), 400
+    
+    # Look up friend's profile_id by email
+    friend_resp = supabase.table("profiles").select("id").eq("email", friend_email).limit(1).execute()
+    if not friend_resp.data:
+        return jsonify({"error": "Friend not found"}), 404
+    
+    friend_user_id = friend_resp.data[0]["id"]
+
+    payload = {"user_id": user_id, "friend_user_id": friend_user_id, "nickname": nickname}
     resp = supabase.table("friends").insert(payload).execute()
     if not resp.data:
         return jsonify({"error": "Failed to add friend"}), 500
@@ -90,22 +121,37 @@ def add_friend(user_id):
 # 6) Previous transactions
 @app.route("/transactions/<user_id>", methods=["GET"])
 def previous_transactions(user_id):
+    # Get ONLY settled/paid transactions where user is payer or payee
     resp = supabase.table("transaction_participants")\
         .select("*, transaction:transaction_id(*)")\
-        .eq("payer_id", user_id)\
-        .or_(f"payee_id.eq.{user_id}")\
+        .eq("status", "paid")\
+        .or_(f"payer_id.eq.{user_id},payee_id.eq.{user_id}")\
         .execute()
+    
     if resp.data is None:
         return jsonify({"error": "Failed to retrieve transactions"}), 500
+    
     transactions = []
+    seen_transaction_ids = set()
+    
     for row in resp.data:
-        txn = row["transaction"]
+        txn = row.get("transaction")
+        if not txn:
+            continue
+        
+        # Avoid duplicates (same transaction can have multiple participants)
+        txn_id = txn.get("id")
+        if txn_id in seen_transaction_ids:
+            continue
+        seen_transaction_ids.add(txn_id)
+        
         transactions.append({
-            "name": txn.get("description"),
+            "name": txn.get("description") or "Expense",
             "date": txn.get("created_at"),
             "source_type": txn.get("source_type"),
             "source_path": txn.get("source_path")
         })
+    
     return jsonify(transactions)
 
 # 7) Settlements (uncompleted transactions)
@@ -123,13 +169,16 @@ def settlements(user_id):
 # 8) Settle by TON
 @app.route("/settle/<transaction_participant_id>", methods=["POST"])
 def settle_by_ton(transaction_participant_id):
-    # For now, just mark as completed
+    # Mark as PAID (not completed) and use paid_at (not completed_at)
     resp = supabase.table("transaction_participants")\
-        .update({"status": "completed", "completed_at": datetime.utcnow().isoformat()})\
+        .update({"status": "paid", "paid_at": datetime.utcnow().isoformat()})\
         .eq("id", transaction_participant_id)\
         .execute()
-    if resp.data is None:
+    
+    if resp.data is None or len(resp.data) == 0:
         return jsonify({"error": "Failed to settle transaction"}), 500
+    
+    # Return 200 with JSON (not 204) to match frontend expectations
     return jsonify({"message": "Settled successfully"}), 200
 
 # 9) Image retrieval (for completed transactions)
