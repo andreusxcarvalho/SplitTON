@@ -1,0 +1,77 @@
+Create a React + Vite project called “money-ai-splitter-miniapp”.
+
+Then:
+1. Install these dependencies:
+   - @twa-dev/sdk
+   - react-router-dom
+   - zustand
+   - recharts
+   - tailwindcss postcss autoprefixer
+   - classnames
+2. Initialize Tailwind CSS (npx tailwindcss init -p).
+3. In tailwind.config.js, set:
+   content: ["./index.html", "./src/**/*.{js,ts,jsx,tsx}"]
+
+4. Replace all project files with the following structure:
+
+src/
+├── main.jsx
+├── App.jsx
+├── lib/
+│   ├── tg.js              # Telegram WebApp SDK initialization
+│   ├── api.js             # Mock API endpoints (placeholder for backend)
+│   └── utils.js
+├── state/
+│   └── store.js           # Zustand global store
+├── components/
+│   ├── CaptureBar.jsx     # Photo/Text/Voice capture input bar
+│   ├── ReceiptCard.jsx    # Displays parsed receipt info
+│   ├── SplitFlow.jsx      # Shows arrows of who owes whom
+│   ├── CashFlowGraph.jsx  # Displays arrow-based cash flow visualization
+│   ├── CategoryChart.jsx  # Recharts pie for spending categories
+│   └── ConfirmModal.jsx   # Confirmation popup
+├── pages/
+│   ├── Home.jsx           # Entry screen: groups, add transaction
+│   ├── AddExpense.jsx     # Upload receipt + enter details
+│   ├── SplitSummary.jsx   # AI split view, edit participants
+│   ├── Settle.jsx         # TON settlement mockup
+│   └── Analytics.jsx      # Spending breakdown by category/time
+└── styles/
+    └── globals.css
+
+5. In App.jsx, use React Router with routes: /, /add, /summary, /settle, /analytics.
+
+6. Initialize Telegram Mini App SDK in lib/tg.js:
+   import WebApp from "@twa-dev/sdk";
+   WebApp.ready();
+   export default WebApp;
+
+7. Add Tailwind CSS base styles to globals.css:
+   @tailwind base;
+   @tailwind components;
+   @tailwind utilities;
+
+8. Add sample mock data and flows in api.js for now. Example:
+   export const getExpense = () => ({
+     id: 1,
+     total: 84.20,
+     participants: ["@ojas", "@nihaal", "@andreuscarvalho", "@manisha"],
+     payer: "@ojas",
+     split: [
+       { from: "@nihaal", to: "@ojas", amount: 21.05 },
+       { from: "@andreuscarvalho", to: "@ojas", amount: 21.05 },
+       { from: "@manisha", to: "@ojas", amount: 21.05 },
+     ],
+     category: "Food & Drinks",
+   });
+
+9. Start the dev server with: npm run dev
+
+The app should open to a responsive Telegram-style interface showing:
+- Capture bar at the bottom
+- Mock transaction list
+- Split arrows (CashFlowGraph)
+- “Settle in TON” button (mock)
+- “Analytics” tab with Recharts pie.
+
+The project should be easily pluggable later with a FastAPI + Supabase backend.
