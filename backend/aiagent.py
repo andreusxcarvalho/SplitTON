@@ -3,7 +3,7 @@ import os
 from typing import List, Union, Optional
 from enum import Enum
 from pydantic import BaseModel, Field
-from google.generativeai.client import Client as genai_Client
+from google import genai
 
 
 # Global API key - can be set via set_api_key() or defaults to env variable
@@ -97,7 +97,7 @@ def parse_text_input(
     # Preprocess: replace pronouns with "You"
     processed_text = _preprocess_input(text)
     
-    client = genai_Client(api_key=_get_api_key())
+    client = genai.Client(api_key=_get_api_key())
     
     friends_str = ", ".join(possible_friends)
     prompt = f"""Extract all transactions from this text (written from the user's perspective): "{processed_text}"
@@ -179,7 +179,7 @@ def parse_image_input(
     elif image_path.lower().endswith(".webp"):
         mime_type = "image/webp"
     
-    client = genai_Client(api_key=_get_api_key())
+    client = genai.Client(api_key=_get_api_key())
     
     friends_str = ", ".join(possible_friends)
     prompt = f"""Analyze this receipt/payment proof image with the following caption (written from user's perspective): "{processed_caption}"
