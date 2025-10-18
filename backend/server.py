@@ -119,8 +119,8 @@ def list_friends(user_id):
     if resp.data is None:
         return jsonify({"error": "Failed to retrieve friends"}), 500
     
-    # Return formatted data matching frontend expectations
-    friends = [{"id": str(f["id"]), "nickname": f["nickname"]} for f in resp.data]
+    # Return formatted data with friend_user_id for mapping to nicknames
+    friends = [{"id": str(f["id"]), "nickname": f["nickname"], "friend_user_id": f["friend_user_id"]} for f in resp.data]
     return jsonify(friends)
 
 # 5) Add friend
@@ -204,7 +204,7 @@ def settlements(user_id):
         return jsonify({"error": "Failed to retrieve settlements"}), 500
     return jsonify(resp.data)
 
-# 😍 Settle by TON
+# 8) Settle by TON
 @app.route("/settle/<transaction_participant_id>", methods=["POST"])
 def settle_by_ton(transaction_participant_id):
     # Mark as PAID (not completed) and use paid_at (not completed_at)
