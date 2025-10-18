@@ -4,6 +4,8 @@ from flask import Flask, request, jsonify
 from bot import start_bot
 from dotenv import load_dotenv
 
+# Try to load .env file for local development
+# In production (Heroku), environment variables are set directly
 load_dotenv()
 
 app = Flask(__name__)
