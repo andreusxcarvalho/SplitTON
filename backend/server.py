@@ -156,53 +156,74 @@ def add_friend(user_id):
         print(f"❌ Add friend error: {str(e)}")
         return jsonify({"error": f"Failed to add friend: {str(e)}"}), 500
 
-# 6) Previous transactions
+# 6) All transactions (ALL participants - both pending and paid)
 @app.route("/transactions/<user_id>", methods=["GET"])
-def previous_transactions(user_id):
-    # Get ONLY settled/paid transactions where user is payer or payee
-    resp = supabase.table("transaction_participants")\
-        .select("*, transaction:transaction_id(*)")\
-        .eq("status", "paid")\
-        .or_(f"payer_id.eq.{user_id},payee_id.eq.{user_id}")\
+def all_transactions(user_id):
+    # Get ALL transaction_items with participant info where user is payer or payee
+    resp = supabase.table("transaction_items")\
+        .select("id, item_name, item_price, category, participant:participant_id(id, payer_id, payee_id, amount, status, created_at, paid_at)")\
         .execute()
     
-    if resp.data is None:
-        return jsonify({"error": "Failed to retrieve transactions"}), 500
+    if not resp.data:
+        return jsonify([]), 200
     
+    # Filter and format transactions where user is involved
     transactions = []
-    seen_transaction_ids = set()
-    
-    for row in resp.data:
-        txn = row.get("transaction")
-        if not txn:
+    for item in resp.data:
+        participant = item.get("participant")
+        if not participant:
             continue
         
-        # Avoid duplicates (same transaction can have multiple participants)
-        txn_id = txn.get("id")
-        if txn_id in seen_transaction_ids:
-            continue
-        seen_transaction_ids.add(txn_id)
-        
-        transactions.append({
-            "name": txn.get("description") or "Expense",
-            "date": txn.get("created_at"),
-            "source_type": txn.get("source_type"),
-            "source_path": txn.get("source_path")
-        })
+        # Only include if user is payer OR payee
+        if participant.get("payer_id") == user_id or participant.get("payee_id") == user_id:
+            transactions.append({
+                "id": participant.get("id"),
+                "payer_id": participant.get("payer_id"),
+                "payee_id": participant.get("payee_id"),
+                "amount": float(participant.get("amount", 0)),
+                "status": participant.get("status"),
+                "item": item.get("item_name"),
+                "category": item.get("category", "Other"),
+                "created_at": participant.get("created_at"),
+                "paid_at": participant.get("paid_at"),
+            })
     
     return jsonify(transactions)
 
-# 7) Settlements (uncompleted transactions)
+# 7) Settlements (pending transactions with item details)
 @app.route("/settlements/<user_id>", methods=["GET"])
 def settlements(user_id):
-    resp = supabase.table("transaction_participants")\
-        .select("*")\
-        .eq("status", "pending")\
-        .or_(f"payer_id.eq.{user_id},payee_id.eq.{user_id}")\
+    # Get all pending transaction_items with participant info where user is payer or payee
+    resp = supabase.table("transaction_items")\
+        .select("id, item_name, item_price, category, participant:participant_id(id, payer_id, payee_id, amount, status, created_at)")\
         .execute()
-    if resp.data is None:
-        return jsonify({"error": "Failed to retrieve settlements"}), 500
-    return jsonify(resp.data)
+    
+    if not resp.data:
+        return jsonify([]), 200
+    
+    # Filter and format settlements where user is involved and status is pending
+    settlements = []
+    for item in resp.data:
+        participant = item.get("participant")
+        if not participant:
+            continue
+        
+        # Only include if status is pending AND user is payer OR payee
+        if participant.get("status") == "pending" and \
+           (participant.get("payer_id") == user_id or participant.get("payee_id") == user_id):
+            settlements.append({
+                "id": participant.get("id"),
+                "payer_id": participant.get("payer_id"),
+                "payee_id": participant.get("payee_id"),
+                "amount": float(participant.get("amount", 0)),
+                "status": participant.get("status"),
+                "transaction_id": None,  # Not needed for settlements
+                "item": item.get("item_name"),
+                "category": item.get("category", "Other"),
+                "created_at": participant.get("created_at"),
+            })
+    
+    return jsonify(settlements)
 
 # 8) Settle by TON
 @app.route("/settle/<transaction_participant_id>", methods=["POST"])
