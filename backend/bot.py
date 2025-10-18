@@ -2,9 +2,10 @@
 import os
 import tempfile
 import logging
+import uuid
 from typing import List, Optional
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 from supabase import create_client
 from aiagent import set_api_key, process_transaction, ParsedTransactions, TransactionInfo
 from dotenv import load_dotenv
@@ -79,6 +80,17 @@ def resolve_name_to_profile_id(owner_profile_id: str, name: str, telegram_from_i
 
     return None
 
+def get_telegram_id_from_profile_id(profile_id: str) -> Optional[int]:
+    """Return telegram_id for a given profile UUID, or None if not found."""
+    try:
+        resp = supabase.table("profiles").select("telegram_id").eq("id", profile_id).limit(1).execute()
+        if resp.data and resp.data[0].get("telegram_id"):
+            return resp.data[0]["telegram_id"]
+        return None
+    except Exception as e:
+        logger.error("Supabase error fetching telegram_id: %s", e)
+        return None
+
 def upload_local_file_to_storage(local_path: str, dest_filename: str) -> Optional[str]:
     """
     Upload local file to Supabase storage bucket and return a signed URL (short-lived).
@@ -108,13 +120,14 @@ def insert_transaction_and_children(creator_profile_id: str,
                                     source_type: str,
                                     source_path: Optional[str],
                                     txn_info: TransactionInfo,
-                                    telegram_from_id: int) -> None:
+                                    telegram_from_id: int) -> str:
     """
     Insert a single TransactionInfo into DB:
       - transactions
       - transaction_participants
       - transaction_items
     txn_info: an instance of TransactionInfo (from ai_agent)
+    Returns: transaction_id (uuid as string)
     """
     # Resolve payer and payee to profile UUIDs
     payer_profile_id = resolve_name_to_profile_id(creator_profile_id, txn_info.from_friend, telegram_from_id)
@@ -169,6 +182,64 @@ def insert_transaction_and_children(creator_profile_id: str,
     except Exception as e:
         logger.error("Error inserting transaction item: %s", e)
         raise RuntimeError("DB error inserting transaction item")
+    
+    return txn_id
+
+def delete_transaction(transaction_id: str) -> bool:
+    """
+    Delete a transaction and all related records (cascade should handle children).
+    Returns True on success, False on error.
+    """
+    try:
+        # Delete transaction_items first (they reference participant_id)
+        participants_resp = supabase.table("transaction_participants").select("id").eq("transaction_id", transaction_id).execute()
+        participant_ids = [p["id"] for p in participants_resp.data] if participants_resp.data else []
+        
+        for pid in participant_ids:
+            supabase.table("transaction_items").delete().eq("participant_id", pid).execute()
+        
+        # Delete participants
+        supabase.table("transaction_participants").delete().eq("transaction_id", transaction_id).execute()
+        
+        # Delete transaction
+        supabase.table("transactions").delete().eq("id", transaction_id).execute()
+        
+        return True
+    except Exception as e:
+        logger.error("Error deleting transaction %s: %s", transaction_id, e)
+        return False
+
+async def send_notification_to_party(context: ContextTypes.DEFAULT_TYPE, 
+                                     telegram_id: int, 
+                                     transaction_id: str,
+                                     creator_name: str,
+                                     txn_info: TransactionInfo,
+                                     payer_name: str,
+                                     payee_name: str) -> None:
+    """
+    Send notification to a party involved in a transaction.
+    Shows transaction details with a Reject button.
+    """
+    try:
+        category_str = txn_info.category.value if hasattr(txn_info, 'category') and txn_info.category else "N/A"
+        
+        message_text = (
+            f"📬 *New transaction from {creator_name}:*\n\n"
+            f"{payer_name} → {payee_name}: ${txn_info.amount:.2f}\n"
+            f"Item: {txn_info.item or 'N/A'}\n"
+            f"Category: {category_str}\n"
+        )
+        
+        keyboard = [[InlineKeyboardButton("✗ Reject", callback_data=f"reject_txn:{transaction_id}")]]
+        
+        await context.bot.send_message(
+            chat_id=telegram_id,
+            text=message_text,
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    except Exception as e:
+        logger.error("Error sending notification to telegram_id %s: %s", telegram_id, e)
 
 # ---------------- COMMAND HANDLERS ----------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -188,7 +259,7 @@ async def handle_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     Handles incoming messages:
      - text
      - image with caption
-    Calls ai_agent.process_transaction(...) and persists results.
+    Calls ai_agent.process_transaction(...) and shows confirmation.
     """
     message = update.message
     chat_id = message.chat.id
@@ -248,29 +319,246 @@ async def handle_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await message.reply_text("Invalid or no transactions found in input.")
             return
 
-        # Insert each parsed TransactionInfo into DB
-        inserted_count = 0
-        for txn in parsed.transactions:
-            # txn is pydantic TransactionInfo; ensure types
-            insert_transaction_and_children(
-                creator_profile_id=owner_profile_id,
-                source_type=source_type,
-                source_path=stored_receipt_url,
-                txn_info=txn,
-                telegram_from_id=telegram_from_id
-            )
-            inserted_count += 1
+        # Store parsed data in context.user_data with unique key
+        unique_key = str(uuid.uuid4())
+        context.user_data[f"pending_txns_{unique_key}"] = {
+            "transactions": parsed.transactions,
+            "source_type": source_type,
+            "source_path": stored_receipt_url,
+            "owner_profile_id": owner_profile_id,
+            "telegram_from_id": telegram_from_id
+        }
 
-        await message.reply_text(f"✅ Recorded {inserted_count} transaction(s).")
+        # Build confirmation message
+        confirmation_text = "📝 *Please confirm these transactions:*\n\n"
+        for i, txn in enumerate(parsed.transactions, 1):
+            category_str = txn.category.value if hasattr(txn, 'category') and txn.category else "N/A"
+            confirmation_text += (
+                f"{i}. {txn.from_friend} → {txn.to_friend}: ${txn.amount:.2f}\n"
+                f"   Item: {txn.item or 'N/A'}\n"
+                f"   Category: {category_str}\n\n"
+            )
+
+        # Add confirmation buttons
+        keyboard = [
+            [
+                InlineKeyboardButton("✓ Confirm All", callback_data=f"confirm_all:{unique_key}"),
+                InlineKeyboardButton("✗ Cancel All", callback_data=f"cancel_all:{unique_key}")
+            ]
+        ]
+
+        await message.reply_text(
+            text=confirmation_text,
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
 
     except Exception as e:
         logger.exception("Error handling input: %s", e)
         await message.reply_text(f"❌ Error: {str(e)}")
 
+# ---------------- CALLBACK HANDLERS ----------------
+async def confirm_all_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle confirmation of all transactions by creator."""
+    query = update.callback_query
+    await query.answer()
+    
+    # Parse callback data
+    callback_data = query.data
+    if not callback_data.startswith("confirm_all:"):
+        await query.edit_message_text("❌ Invalid callback data")
+        return
+    
+    unique_key = callback_data.split(":", 1)[1]
+    data_key = f"pending_txns_{unique_key}"
+    
+    # Retrieve stored data
+    if data_key not in context.user_data:
+        await query.edit_message_text("❌ Transaction data expired. Please try again.")
+        return
+    
+    pending_data = context.user_data[data_key]
+    transactions = pending_data["transactions"]
+    source_type = pending_data["source_type"]
+    source_path = pending_data["source_path"]
+    owner_profile_id = pending_data["owner_profile_id"]
+    telegram_from_id = pending_data["telegram_from_id"]
+    
+    try:
+        # Get creator's profile info for notifications
+        creator_profile = get_profile_by_telegram_id(telegram_from_id)
+        creator_name = creator_profile.get("username", "Someone") if creator_profile else "Someone"
+        
+        # Insert each transaction and send notifications
+        inserted_txns = []
+        for txn in transactions:
+            # Insert to DB
+            txn_id = insert_transaction_and_children(
+                creator_profile_id=owner_profile_id,
+                source_type=source_type,
+                source_path=source_path,
+                txn_info=txn,
+                telegram_from_id=telegram_from_id
+            )
+            
+            # Store transaction info for notifications
+            inserted_txns.append({
+                "id": txn_id,
+                "txn_info": txn
+            })
+        
+        # Update confirmation message
+        await query.edit_message_text(f"✅ Recorded {len(inserted_txns)} transaction(s)!")
+        
+        # Send notifications to other parties
+        for item in inserted_txns:
+            txn_id = item["id"]
+            txn_info = item["txn_info"]
+            
+            # Resolve payer and payee profile IDs
+            payer_profile_id = resolve_name_to_profile_id(owner_profile_id, txn_info.from_friend, telegram_from_id)
+            payee_profile_id = resolve_name_to_profile_id(owner_profile_id, txn_info.to_friend, telegram_from_id)
+            
+            if not payer_profile_id or not payee_profile_id:
+                logger.warning("Could not resolve payer/payee for notification")
+                continue
+            
+            # Get telegram IDs for both parties
+            payer_telegram_id = get_telegram_id_from_profile_id(payer_profile_id)
+            payee_telegram_id = get_telegram_id_from_profile_id(payee_profile_id)
+            
+            # Send notification to payer (if not the creator)
+            if payer_telegram_id and payer_telegram_id != telegram_from_id:
+                await send_notification_to_party(
+                    context=context,
+                    telegram_id=payer_telegram_id,
+                    transaction_id=txn_id,
+                    creator_name=creator_name,
+                    txn_info=txn_info,
+                    payer_name=txn_info.from_friend,
+                    payee_name=txn_info.to_friend
+                )
+            
+            # Send notification to payee (if not the creator)
+            if payee_telegram_id and payee_telegram_id != telegram_from_id:
+                await send_notification_to_party(
+                    context=context,
+                    telegram_id=payee_telegram_id,
+                    transaction_id=txn_id,
+                    creator_name=creator_name,
+                    txn_info=txn_info,
+                    payer_name=txn_info.from_friend,
+                    payee_name=txn_info.to_friend
+                )
+        
+        # Cleanup stored data
+        del context.user_data[data_key]
+
+    except Exception as e:
+        logger.exception("Error confirming transactions: %s", e)
+        await query.edit_message_text(f"❌ Error: {str(e)}")
+
+async def cancel_all_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle cancellation of all transactions by creator."""
+    query = update.callback_query
+    await query.answer()
+    
+    # Parse callback data
+    callback_data = query.data
+    if not callback_data.startswith("cancel_all:"):
+        await query.edit_message_text("❌ Invalid callback data")
+        return
+    
+    unique_key = callback_data.split(":", 1)[1]
+    data_key = f"pending_txns_{unique_key}"
+    
+    # Cleanup stored data
+    if data_key in context.user_data:
+        del context.user_data[data_key]
+    
+    await query.edit_message_text("❌ Cancelled")
+
+async def reject_transaction_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle rejection of a transaction by a participant."""
+    query = update.callback_query
+    await query.answer()
+    
+    # Parse callback data
+    callback_data = query.data
+    if not callback_data.startswith("reject_txn:"):
+        await query.edit_message_text("❌ Invalid callback data")
+        return
+    
+    transaction_id = callback_data.split(":", 1)[1]
+    rejector_telegram_id = query.from_user.id
+    
+    try:
+        # Get transaction details before deleting (for notification to creator)
+        txn_resp = supabase.table("transactions").select("*, transaction_participants(*, transaction_items(*))").eq("id", transaction_id).limit(1).execute()
+        
+        if not txn_resp.data:
+            await query.edit_message_text("❌ Transaction not found")
+            return
+        
+        txn_data = txn_resp.data[0]
+        creator_id = txn_data["creator_id"]
+        total_amount = txn_data["total_amount"]
+        description = txn_data.get("description", "N/A")
+        
+        # Get participants info for notification
+        participants = txn_data.get("transaction_participants", [])
+        participant_info = ""
+        if participants:
+            part = participants[0]
+            payer_id = part.get("payer_id")
+            payee_id = part.get("payee_id")
+            amount = part.get("amount", total_amount)
+            
+            # Get names (simple lookup - you might want to improve this)
+            participant_info = f"Amount: ${amount:.2f}"
+        
+        # Delete the transaction
+        if delete_transaction(transaction_id):
+            # Update the notification message
+            await query.edit_message_text("❌ You rejected this transaction")
+            
+            # Notify the creator
+            creator_telegram_id = get_telegram_id_from_profile_id(creator_id)
+            if creator_telegram_id:
+                rejector_profile = get_profile_by_telegram_id(rejector_telegram_id)
+                rejector_name = rejector_profile.get("username", "Someone") if rejector_profile else "Someone"
+                
+                notification_text = (
+                    f"⚠️ *{rejector_name} rejected a transaction:*\n\n"
+                    f"{participant_info}\n"
+                    f"Description: {description}"
+                )
+                
+                await context.bot.send_message(
+                    chat_id=creator_telegram_id,
+                    text=notification_text,
+                    parse_mode="Markdown"
+                )
+        else:
+            await query.edit_message_text("❌ Error deleting transaction")
+            
+    except Exception as e:
+        logger.exception("Error rejecting transaction: %s", e)
+        await query.edit_message_text(f"❌ Error: {str(e)}")
+
 def start_bot():
     """Start the Telegram bot (for use in server.py or standalone testing)."""
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+    
+    # Command handlers
     app.add_handler(CommandHandler("start", start))
+    
+    # Callback query handlers
+    app.add_handler(CallbackQueryHandler(confirm_all_callback, pattern="^confirm_all:"))
+    app.add_handler(CallbackQueryHandler(cancel_all_callback, pattern="^cancel_all:"))
+    app.add_handler(CallbackQueryHandler(reject_transaction_callback, pattern="^reject_txn:"))
+    
+    # Message handler (must be last to avoid conflicts)
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_input))
 
     logger.info("Bot starting (polling mode)...")
