@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app)
+CORS(app)  # Enable CORS for all routes
 
 SUPABASE_URL = os.getenv("PROJECT_URL")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("DATABASE_API_KEY")
@@ -19,7 +19,6 @@ supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 MINIAPP_URL = os.getenv("MINIAPP_URL")
 
 # ===== Health Check API endpoint =====
-# 0) Health Check Endpoint (NEW)
 @app.route("/health", methods=["GET"])
 def health_check():
     """Simple endpoint to confirm the server is running."""
@@ -34,9 +33,14 @@ def register_user():
     print(f"REGISTER: {email}")
     if not email:
         return jsonify({"error": "Missing email"}), 400
-    response = supabase.auth.sign_in_with_otp({"email": email})
-    print(response)
-    return jsonify({"message": "OTP sent to email"}), 200
+    
+    try:
+        response = supabase.auth.sign_in_with_otp({"email": email})
+        print(f"✅ OTP sent to: {email}")
+        return jsonify({"message": "OTP sent to email"}), 200
+    except Exception as e:
+        print(f"❌ Supabase OTP Error: {str(e)}")
+        return jsonify({"error": f"Failed to send OTP: {str(e)}"}), 400
 
 # 2) Verify user
 @app.route("/verify", methods=["POST"])
@@ -44,14 +48,43 @@ def verify_user():
     data = request.json
     email = data.get("email")
     otp = data.get("otp")
+    telegram_id = data.get("telegram_id")  # Get telegram_id from frontend
+    
     if not email or not otp:
         return jsonify({"error": "Missing email or otp"}), 400
-    session = supabase.auth.verify_otp({"email": email, "token": otp, "type": "email"})
-    if session.user:
-        return jsonify({"message": "Verified!", "user_id": session.user.id}), 200
-    else:
-        # NOTE: session may have .error or user is None. We only check for user success.
-        return jsonify({"error": "Invalid OTP"}), 400
+    
+    try:
+        # Verify OTP with Supabase
+        session = supabase.auth.verify_otp({"email": email, "token": otp, "type": "email"})
+        
+        if not session.user:
+            return jsonify({"error": "Invalid OTP"}), 400
+        
+        user_id = session.user.id
+        
+        # Create or update profile in profiles table
+        existing_profile = supabase.table("profiles").select("id").eq("id", user_id).execute()
+        
+        if not existing_profile.data:
+            # Create new profile
+            profile_data = {
+                "id": user_id,
+                "email": email,
+                "telegram_id": telegram_id or 0  # Use provided telegram_id or fallback to 0
+            }
+            result = supabase.table("profiles").insert(profile_data).execute()
+            print(f"✅ Created profile for user: {user_id} with telegram_id: {telegram_id}")
+        else:
+            # Update existing profile's telegram_id if provided
+            if telegram_id:
+                supabase.table("profiles").update({"telegram_id": telegram_id}).eq("id", user_id).execute()
+                print(f"✅ Updated telegram_id for user: {user_id}")
+        
+        return jsonify({"message": "Verified!", "user_id": user_id}), 200
+        
+    except Exception as e:
+        print(f"❌ Verification Error: {str(e)}")
+        return jsonify({"error": f"Verification failed: {str(e)}"}), 400
 
 # 3) Stats
 @app.route("/stats/<user_id>", methods=["GET"])
@@ -96,21 +129,32 @@ def add_friend(user_id):
     data = request.json
     friend_email = data.get("email")
     nickname = data.get("nickname")
+    
     if not friend_email or not nickname:
         return jsonify({"error": "Missing email or nickname"}), 400
     
-    # Look up friend's profile_id by email
-    friend_resp = supabase.table("profiles").select("id").eq("email", friend_email).limit(1).execute()
-    if not friend_resp.data:
-        return jsonify({"error": "Friend not found"}), 404
-    
-    friend_user_id = friend_resp.data[0]["id"]
+    try:
+        # Look up friend's profile_id by email in profiles table
+        friend_resp = supabase.table("profiles").select("id").eq("email", friend_email).limit(1).execute()
+        
+        if not friend_resp.data:
+            return jsonify({"error": "Friend not found. Make sure they have registered first."}), 404
+        
+        friend_user_id = friend_resp.data[0]["id"]
 
-    payload = {"user_id": user_id, "friend_user_id": friend_user_id, "nickname": nickname}
-    resp = supabase.table("friends").insert(payload).execute()
-    if not resp.data:
-        return jsonify({"error": "Failed to add friend"}), 500
-    return jsonify({"message": "Friend added"}), 200
+        # Insert friend relationship
+        payload = {"user_id": user_id, "friend_user_id": friend_user_id, "nickname": nickname}
+        resp = supabase.table("friends").insert(payload).execute()
+        
+        if not resp.data:
+            return jsonify({"error": "Failed to add friend"}), 500
+        
+        print(f"✅ Friend added: {nickname} ({friend_email}) for user {user_id}")
+        return jsonify({"message": "Friend added"}), 200
+        
+    except Exception as e:
+        print(f"❌ Add friend error: {str(e)}")
+        return jsonify({"error": f"Failed to add friend: {str(e)}"}), 500
 
 # 6) Previous transactions
 @app.route("/transactions/<user_id>", methods=["GET"])
@@ -157,10 +201,10 @@ def settlements(user_id):
         .or_(f"payer_id.eq.{user_id},payee_id.eq.{user_id}")\
         .execute()
     if resp.data is None:
-        return jsonify({"error": "Failed to retrieve settlemenets"}), 500
+        return jsonify({"error": "Failed to retrieve settlements"}), 500
     return jsonify(resp.data)
 
-# 8) Settle by TON
+# 😍 Settle by TON
 @app.route("/settle/<transaction_participant_id>", methods=["POST"])
 def settle_by_ton(transaction_participant_id):
     # Mark as PAID (not completed) and use paid_at (not completed_at)
@@ -185,6 +229,6 @@ def retrieve_image(transaction_id):
     return jsonify({"source_path": txn.get("source_path"), "source_type": txn.get("source_type")})
 
 
-if __name__ == "__main__":
+if name == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
