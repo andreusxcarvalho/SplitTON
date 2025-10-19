@@ -1,38 +1,120 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
-import { Coins, Wallet, TrendingUp, Users, Mail } from "lucide-react";
+import { Coins, Wallet, TrendingUp, Users, Mail, Loader2 } from "lucide-react";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest, saveSession } from "@/lib/api";
+import WebApp from "@twa-dev/sdk";
 
 export default function AuthPage() {
   const [, setLocation] = useLocation();
+  const { toast } = useToast();
   
   const [email, setEmail] = useState("");
   const [otp, setOtp] = useState("");
   const [otpSent, setOtpSent] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [telegramId, setTelegramId] = useState<number | null>(null);
 
-  const handleSendOTP = (e: React.FormEvent) => {
+  // Extract Telegram ID from Telegram Mini App
+  useEffect(() => {
+    try {
+      // Log everything for debugging
+      console.log("🔍 Full WebApp object:", WebApp);
+      console.log("🔍 WebApp.initDataUnsafe:", WebApp.initDataUnsafe);
+      console.log("🔍 WebApp.initData:", WebApp.initData);
+      
+      // Try multiple ways to get telegram ID
+      const tgUser = WebApp.initDataUnsafe?.user;
+      console.log("🔍 Extracted user object:", tgUser);
+      
+      if (tgUser?.id) {
+        setTelegramId(tgUser.id);
+        console.log("✅ Telegram User ID:", tgUser.id);
+        console.log("✅ Telegram Username:", tgUser.username);
+        console.log("✅ Telegram First Name:", tgUser.first_name);
+      } else {
+        // Fallback for testing outside Telegram (use timestamp as fake ID)
+        const fallbackId = Date.now() % 1000000000;
+        setTelegramId(fallbackId);
+        console.warn("⚠️ Running outside Telegram, using fallback ID:", fallbackId);
+        console.warn("⚠️ WebApp.initDataUnsafe.user was:", tgUser);
+      }
+    } catch (error) {
+      console.error("❌ Failed to get Telegram data:", error);
+      // Use timestamp as fallback
+      setTelegramId(Date.now() % 1000000000);
+    }
+  }, []);
+
+  const handleSendOTP = async (e: React.FormEvent) => {
     e.preventDefault();
-    console.log("📧 Sending OTP to email:", email);
-    setOtpSent(true);
-    // TODO: Wire up Supabase email sending here
+    setIsLoading(true);
+    
+    try {
+      await apiRequest("POST", "/register", { email });
+      
+      toast({
+        title: "OTP Sent!",
+        description: "Check your email for the verification code",
+      });
+      
+      setOtpSent(true);
+      console.log("📧 OTP sent to:", email);
+    } catch (error: any) {
+      toast({
+        title: "Failed to send OTP",
+        description: error.message || "Please try again",
+        variant: "destructive",
+      });
+      console.error("❌ Error sending OTP:", error);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const handleVerifyOTP = (e: React.FormEvent) => {
+  const handleVerifyOTP = async (e: React.FormEvent) => {
     e.preventDefault();
-    console.log("✅ Verifying OTP for email:", email);
-    console.log("🔢 OTP Code:", otp);
+    setIsLoading(true);
     
-    // Output email for Supabase integration
-    window.userEmail = email;
-    console.log("💾 Email stored in window.userEmail:", window.userEmail);
-    
-    // TODO: Wire up Supabase verification here
-    // For now, just navigate to the app
-    setLocation("/transactions");
+    try {
+      console.log("📤 Sending to backend:", { email, otp: "***", telegram_id: telegramId });
+      
+      const response = await apiRequest<{ message: string; user_id: string }>(
+        "POST",
+        "/verify",
+        { 
+          email, 
+          otp,
+          telegram_id: telegramId // Send Telegram ID to backend
+        }
+      );
+      
+      // Save session to localStorage (persists across refreshes!)
+      saveSession(response.user_id, email, telegramId || undefined);
+      
+      console.log("✅ User verified:", { email, userId: response.user_id, telegramId });
+      
+      toast({
+        title: "Welcome!",
+        description: "Successfully logged in",
+      });
+      
+      setLocation("/transactions");
+    } catch (error: any) {
+      toast({
+        title: "Verification failed",
+        description: error.message || "Invalid OTP",
+        variant: "destructive",
+      });
+      console.error("❌ Error verifying OTP:", error);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -83,8 +165,16 @@ export default function AuthPage() {
                     type="submit"
                     className="w-full"
                     data-testid="button-send-otp"
+                    disabled={isLoading}
                   >
-                    Send OTP
+                    {isLoading ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Sending...
+                      </>
+                    ) : (
+                      "Send OTP"
+                    )}
                   </Button>
                 </form>
               ) : (
@@ -142,16 +232,24 @@ export default function AuthPage() {
                     <Button
                       type="submit"
                       className="w-full"
-                      disabled={otp.length !== 6}
+                      disabled={otp.length !== 6 || isLoading}
                       data-testid="button-verify-otp"
                     >
-                      Verify & Continue
+                      {isLoading ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Verifying...
+                        </>
+                      ) : (
+                        "Verify & Continue"
+                      )}
                     </Button>
                     <Button
                       type="button"
                       variant="outline"
                       className="w-full"
                       onClick={handleSendOTP}
+                      disabled={isLoading}
                       data-testid="button-resend-otp"
                     >
                       Resend OTP

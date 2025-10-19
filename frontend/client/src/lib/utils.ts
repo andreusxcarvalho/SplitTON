@@ -52,26 +52,35 @@ export function getColorFromString(str: string): string {
   return colors[Math.abs(hash) % colors.length];
 }
 
+// Category icon names (Lucide React icons)
 export function getCategoryIcon(category: string): string {
-  const icons: Record<string, string> = {
-    "Food & Drinks": "🍽️",
-    "Transport": "🚗",
-    "Entertainment": "🎬",
-    "Shopping": "🛍️",
-    "Bills": "📄",
-    "Other": "📌",
+  const iconMap: Record<string, string> = {
+    "Food": "UtensilsCrossed",
+    "Transportation": "Car",
+    "Housing": "Home",
+    "Utilities": "Zap",
+    "Health": "HeartPulse",
+    "Entertainment": "Popcorn",
+    "Shopping": "ShoppingBag",
+    "Education": "GraduationCap",
+    "Travel": "Plane",
+    "Other": "MoreHorizontal",
   };
-  return icons[category] || "📌";
+  return iconMap[category] || "MoreHorizontal";
 }
 
 export function getCategoryColor(category: string): string {
-  const colors: Record<string, string> = {
-    "Food & Drinks": "hsl(var(--chart-3))",
-    "Transport": "hsl(var(--chart-1))",
-    "Entertainment": "hsl(var(--chart-4))",
-    "Shopping": "hsl(var(--chart-5))",
-    "Bills": "hsl(var(--chart-2))",
+  const colorMap: Record<string, string> = {
+    "Food": "hsl(var(--chart-3))",
+    "Transportation": "hsl(var(--chart-1))",
+    "Housing": "hsl(var(--chart-5))",
+    "Utilities": "hsl(var(--chart-2))",
+    "Health": "hsl(var(--chart-4))",
+    "Entertainment": "hsl(var(--chart-6))",
+    "Shopping": "hsl(var(--chart-1))",
+    "Education": "hsl(var(--chart-5))",
+    "Travel": "hsl(var(--chart-3))",
     "Other": "hsl(var(--muted))",
   };
-  return colors[category] || "hsl(var(--muted))";
+  return colorMap[category] || "hsl(var(--muted))";
 }

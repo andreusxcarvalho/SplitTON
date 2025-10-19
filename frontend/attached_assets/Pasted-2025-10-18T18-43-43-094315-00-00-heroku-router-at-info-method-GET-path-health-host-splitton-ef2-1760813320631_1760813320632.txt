@@ -1,0 +1,32 @@
+2025-10-18T18:43:43.094315+00:00 heroku[router]: at=info method=GET path="/health" host=splitton-ef215d77f9d0.herokuapp.com request_id=a06cba97-a37a-12ec-9ae7-aa618e74bfc4 fwd="136.117.124.241" dyno=web.1 connect=0ms service=1ms status=200 bytes=16 protocol=http1.1 tls=true tls_version=unknown
+2025-10-18T18:43:43.094322+00:00 app[web.1]: 10.1.27.80 - - [18/Oct/2025:18:43:43 +0000] "GET /health HTTP/1.1" 200 16 "-" "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
+2025-10-18T18:43:50.883392+00:00 app[worker.1]: INFO:httpx:HTTP Request: POST https://api.telegram.org/bot7651391698:AAFed15lajiauDRvyAtS4nt68koYr-4EDEI/getUpdates "HTTP/1.1 200 OK"
+2025-10-18T18:43:51.590652+00:00 app[web.1]: REGISTER: playwright-test@example.com
+2025-10-18T18:43:53.529188+00:00 heroku[router]: at=info method=POST path="/register" host=splitton-ef215d77f9d0.herokuapp.com request_id=f36373f1-1c3f-7e41-7eea-cc804df4f090 fwd="136.117.124.241" dyno=web.1 connect=0ms service=1939ms status=500 bytes=265 protocol=http1.1 tls=true tls_version=unknown
+2025-10-18T18:43:53.526165+00:00 app[web.1]: INFO:httpx:HTTP Request: POST https://dqomvlyrrezythpqncsf.supabase.co/auth/v1/otp "HTTP/2 400 Bad Request"
+2025-10-18T18:43:53.528586+00:00 app[web.1]: ERROR:server:Exception on /register [POST]
+2025-10-18T18:43:53.528587+00:00 app[web.1]: Traceback (most recent call last):
+2025-10-18T18:43:53.528597+00:00 app[web.1]:   File "/app/.heroku/python/lib/python3.11/site-packages/supabase_auth/_sync/gotrue_base_api.py", line 120, in _request
+2025-10-18T18:43:53.528598+00:00 app[web.1]:     response.raise_for_status()
+2025-10-18T18:43:53.528598+00:00 app[web.1]:   File "/app/.heroku/python/lib/python3.11/site-packages/httpx/_models.py", line 829, in raise_for_status
+2025-10-18T18:43:53.528599+00:00 app[web.1]:     raise HTTPStatusError(message, request=request, response=self)
+2025-10-18T18:43:53.528599+00:00 app[web.1]: httpx.HTTPStatusError: Client error '400 Bad Request' for url 'https://dqomvlyrrezythpqncsf.supabase.co/auth/v1/otp'
+2025-10-18T18:43:53.528602+00:00 app[web.1]: For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/400
+2025-10-18T18:43:53.528602+00:00 app[web.1]: 
+2025-10-18T18:43:53.528603+00:00 app[web.1]: During handling of the above exception, another exception occurred:
+2025-10-18T18:43:53.528603+00:00 app[web.1]: 
+2025-10-18T18:43:53.528603+00:00 app[web.1]: Traceback (most recent call last):
+2025-10-18T18:43:53.528604+00:00 app[web.1]:   File "/app/.heroku/python/lib/python3.11/site-packages/flask/app.py", line 1511, in wsgi_app
+2025-10-18T18:43:53.528604+00:00 app[web.1]:     response = self.full_dispatch_request()
+2025-10-18T18:43:53.528604+00:00 app[web.1]:                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2025-10-18T18:43:53.528605+00:00 app[web.1]:   File "/app/.heroku/python/lib/python3.11/site-packages/flask/app.py", line 919, in full_dispatch_request
+2025-10-18T18:43:53.528605+00:00 app[web.1]:     rv = self.handle_user_exception(e)
+2025-10-18T18:43:53.528606+00:00 app[web.1]:          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2025-10-18T18:43:53.528606+00:00 app[web.1]:   File "/app/.heroku/python/lib/python3.11/site-packages/flask/app.py", line 917, in full_dispatch_request
+2025-10-18T18:43:53.528606+00:00 app[web.1]:     rv = self.dispatch_request()
+2025-10-18T18:43:53.528606+00:00 app[web.1]:          ^^^^^^^^^^^^^^^^^^^^^^^
+2025-10-18T18:43:53.528607+00:00 app[web.1]:   File "/app/.heroku/python/lib/python3.11/site-packages/flask/app.py", line 902, in dispatch_request
+2025-10-18T18:43:53.528607+00:00 app[web.1]:     return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+2025-10-18T18:43:53.528608+00:00 app[web.1]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2025-10-18T18:43:53.528608+00:00 app[web.1]:   File "/app/backend/server.py", line 35, in register_user
+2025-10-18T18:43:53.528609+00:00 app[web.1]:     response = supabase.auth.sign_in_with_otp({"email": email})

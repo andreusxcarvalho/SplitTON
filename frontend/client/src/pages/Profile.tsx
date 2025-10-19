@@ -1,40 +1,53 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { User, UserPlus, Trash2, ArrowLeft, Mail } from "lucide-react";
-import { Link } from "wouter";
+import { User, UserPlus, Trash2, ArrowLeft, Mail, LogOut } from "lucide-react";
+import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { queryClient } from "@/lib/queryClient";
+import { apiRequest as herokuApiRequest, getCurrentUserId, getCurrentUserEmail, clearSession } from "@/lib/api";
 import { getInitials, getColorFromString, cn } from "@/lib/utils";
-import type { Friend } from "@shared/schema";
+
+interface Friend {
+  id: string;
+  user_id: string;
+  friend_user_id: string;
+  nickname: string;
+  created_at?: string;
+}
 
 export default function Profile() {
   const { toast } = useToast();
+  const [, setLocation] = useLocation();
   const [nickname, setNickname] = useState("");
   const [email, setEmail] = useState("");
 
-  // Get current user email from window (set during auth)
-  const userEmail = (window as any).userEmail || "user@example.com";
+  // Get current user from window (set during auth)
+  const userId = getCurrentUserId();
+  const userEmail = getCurrentUserEmail() || "user@example.com";
 
-  const { data: friends } = useQuery<Friend[]>({
-    queryKey: ["/api/friends", userEmail],
+  const { data: friends, isLoading } = useQuery<Friend[]>({
+    queryKey: ["friends", userId],
     queryFn: async () => {
-      const response = await fetch(`/api/friends?userEmail=${encodeURIComponent(userEmail)}`);
-      if (!response.ok) throw new Error("Failed to fetch friends");
-      return response.json();
+      if (!userId) return [];
+      return await herokuApiRequest<Friend[]>("GET", `/friends/${userId}`);
     },
+    enabled: !!userId,
+    refetchOnWindowFocus: true,  // Auto-refresh when Mini App reopens
+    staleTime: 60000,  // Friends list changes less often, fresh for 1 minute
   });
 
   const addFriendMutation = useMutation({
-    mutationFn: async (newFriend: { userEmail: string; nickname: string; email: string }) => {
-      return await apiRequest("POST", "/api/friends", newFriend);
+    mutationFn: async (data: { nickname: string; email: string }) => {
+      if (!userId) throw new Error("User not authenticated");
+      return await herokuApiRequest("POST", `/friends/${userId}`, data);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/friends", userEmail] });
+      queryClient.invalidateQueries({ queryKey: ["friends", userId] });
       setNickname("");
       setEmail("");
       toast({
@@ -42,10 +55,10 @@ export default function Profile() {
         description: "You can now split expenses with them",
       });
     },
-    onError: () => {
+    onError: (error: any) => {
       toast({
         title: "Failed to add friend",
-        description: "Please try again",
+        description: error.message || "Please try again",
         variant: "destructive",
       });
     },
@@ -53,19 +66,20 @@ export default function Profile() {
 
   const deleteFriendMutation = useMutation({
     mutationFn: async (friendId: string) => {
-      return await apiRequest("DELETE", `/api/friends/${friendId}`, {});
+      if (!userId) throw new Error("User not authenticated");
+      return await herokuApiRequest("DELETE", `/friends/${friendId}`);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/friends", userEmail] });
+      queryClient.invalidateQueries({ queryKey: ["friends", userId] });
       toast({
         title: "Friend removed",
         description: "They've been removed from your friends list",
       });
     },
-    onError: () => {
+    onError: (error: any) => {
       toast({
         title: "Failed to remove friend",
-        description: "Please try again",
+        description: error.message || "Please try again",
         variant: "destructive",
       });
     },
@@ -84,7 +98,6 @@ export default function Profile() {
     }
 
     addFriendMutation.mutate({
-      userEmail,
       nickname: nickname.trim(),
       email: email.trim(),
     });
@@ -92,6 +105,15 @@ export default function Profile() {
 
   const handleDeleteFriend = (friendId: string) => {
     deleteFriendMutation.mutate(friendId);
+  };
+
+  const handleLogout = () => {
+    clearSession();
+    toast({
+      title: "Logged out",
+      description: "You've been successfully logged out",
+    });
+    setLocation("/");
   };
 
   return (
@@ -118,7 +140,7 @@ export default function Profile() {
           <CardHeader>
             <CardTitle>Your Account</CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-4">
             <div className="flex items-center gap-4">
               <Avatar className="h-16 w-16 bg-primary">
                 <AvatarFallback className="text-white text-xl font-bold">
@@ -135,6 +157,16 @@ export default function Profile() {
                 </p>
               </div>
             </div>
+            
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={handleLogout}
+              data-testid="button-logout"
+            >
+              <LogOut className="h-4 w-4 mr-2" />
+              Log Out
+            </Button>
           </CardContent>
         </Card>
 
@@ -212,7 +244,6 @@ export default function Profile() {
                       </Avatar>
                       <div className="min-w-0">
                         <p className="font-semibold truncate">{friend.nickname}</p>
-                        <p className="text-sm text-muted-foreground truncate">{friend.email}</p>
                       </div>
                     </div>
 

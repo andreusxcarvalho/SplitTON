@@ -1,165 +1,255 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Coins, CheckCircle2, Image, Mic, Send, Wallet } from "lucide-react";
+import { Coins, Send, Wallet, CheckCircle2, UtensilsCrossed, Car, Home, Zap, HeartPulse, Popcorn, ShoppingBag, GraduationCap, Plane, MoreHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
 import { ConfirmModal } from "@/components/ConfirmModal";
-import { formatCurrency, getInitials, getColorFromString, formatDate } from "@/lib/utils";
+import { formatCurrency, getInitials, getColorFromString, getCategoryIcon, getCategoryColor } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest, queryClient } from "@/lib/queryClient";
-import type { Split, Expense } from "@shared/schema";
+import { queryClient } from "@/lib/queryClient";
+import { apiRequest as herokuApiRequest, getCurrentUserId } from "@/lib/api";
+import WebApp from "@twa-dev/sdk";
 
-// For demo purposes - in real app, get this from auth context
-const CURRENT_USER = "You";
-
-interface DebtWithExpense extends Split {
-  expense: Expense;
+interface Settlement {
+  id: string;
+  payer_id: string;
+  payee_id: string;
+  amount: number;
+  status: string;
+  transaction_id: string;
+  item?: string;
+  category?: string;
+  created_at?: string;
 }
+
+interface GroupedSettlement {
+  personId: string;
+  personName: string;
+  netAmount: number; // Positive = they owe me, Negative = I owe them
+  items: Array<{
+    id: string;
+    name: string;
+    category: string;
+    amount: number;
+    direction: 'owed_to_me' | 'i_owe'; // For individual item tracking
+  }>;
+  settlementIds: string[]; // All settlement IDs to settle at once
+}
+
+// Map icon names to actual Lucide components
+const iconComponents: Record<string, any> = {
+  UtensilsCrossed,
+  Car,
+  Home,
+  Zap,
+  HeartPulse,
+  Popcorn,
+  ShoppingBag,
+  GraduationCap,
+  Plane,
+  MoreHorizontal,
+};
 
 export default function Settle() {
   const { toast } = useToast();
-  const [selectedDebt, setSelectedDebt] = useState<DebtWithExpense | null>(null);
-  const [showTonModal, setShowTonModal] = useState(false);
+  const [selectedGroup, setSelectedGroup] = useState<GroupedSettlement | null>(null);
   const [showRequestModal, setShowRequestModal] = useState(false);
 
-  const { data: splits } = useQuery<Split[]>({
-    queryKey: ["/api/splits"],
+  const userId = getCurrentUserId();
+
+  const { data: settlements, isLoading } = useQuery<Settlement[]>({
+    queryKey: ["settlements", userId],
+    queryFn: async () => {
+      if (!userId) return [];
+      return await herokuApiRequest<Settlement[]>("GET", `/settlements/${userId}`);
+    },
+    enabled: !!userId,
+    refetchOnWindowFocus: true,
+    staleTime: 30000,
   });
 
-  const { data: expenses } = useQuery<Expense[]>({
-    queryKey: ["/api/expenses"],
+  // Fetch friends to map user IDs to nicknames
+  const { data: friends } = useQuery<Array<{ id: string; nickname: string; friend_user_id?: string }>>({
+    queryKey: ["friends", userId],
+    queryFn: async () => {
+      if (!userId) return [];
+      return await herokuApiRequest<Array<{ id: string; nickname: string; friend_user_id?: string }>>("GET", `/friends/${userId}`);
+    },
+    enabled: !!userId,
+    refetchOnWindowFocus: true,
+    staleTime: 60000,
   });
 
-  // Join splits with expenses
-  const debtsWithExpenses: DebtWithExpense[] = (splits || [])
-    .map((split) => ({
-      ...split,
-      expense: expenses?.find((e) => e.id === split.expenseId)!,
-    }))
-    .filter((d) => d.expense && d.amount - d.settled > 0); // Only unsettled debts
+  // Create mapping from friend_user_id to nickname
+  const friendIdToNickname = (friends || []).reduce((acc, friend) => {
+    if (friend.friend_user_id) {
+      acc[friend.friend_user_id] = friend.nickname;
+    }
+    return acc;
+  }, {} as Record<string, string>);
 
-  // Separate "You Owe" and "You're Owed"
-  const youOwe = debtsWithExpenses.filter((d) => d.from === CURRENT_USER);
-  const youAreOwed = debtsWithExpenses.filter((d) => d.to === CURRENT_USER);
+  // Group settlements by person and calculate net amounts
+  const groupedSettlements: GroupedSettlement[] = (() => {
+    if (!settlements || !userId) return [];
 
-  // Settlement mutation
-  const settleMutation = useMutation({
-    mutationFn: async ({ splitId, amount }: { splitId: string; amount: number }) => {
-      return await apiRequest("PATCH", `/api/splits/${splitId}`, { settled: amount });
+    const personMap = new Map<string, GroupedSettlement>();
+
+    settlements.forEach((settlement) => {
+      const userIsPayer = settlement.payer_id === userId;
+      const otherPersonId = userIsPayer ? settlement.payee_id : settlement.payer_id;
+      const personName = friendIdToNickname[otherPersonId] || `User ${otherPersonId.substring(0, 8)}`;
+
+      // Get or create person group
+      if (!personMap.has(otherPersonId)) {
+        personMap.set(otherPersonId, {
+          personId: otherPersonId,
+          personName,
+          netAmount: 0,
+          items: [],
+          settlementIds: [],
+        });
+      }
+
+      const group = personMap.get(otherPersonId)!;
+
+      // If I'm the payer, they owe me (+amount to net)
+      // If I'm the payee, I owe them (-amount to net)
+      const amountDelta = userIsPayer ? settlement.amount : -settlement.amount;
+      group.netAmount += amountDelta;
+
+      // Add item details (backend returns 'item' not 'item_name')
+      group.items.push({
+        id: settlement.id,
+        name: settlement.item || "Item",
+        category: settlement.category || "Other",
+        amount: settlement.amount,
+        direction: userIsPayer ? 'owed_to_me' : 'i_owe',
+      });
+
+      // Track settlement IDs
+      group.settlementIds.push(settlement.id);
+    });
+
+    return Array.from(personMap.values());
+  })();
+
+  // Separate into "You Owe" (net negative) and "You're Owed" (net positive)
+  const youOwe = groupedSettlements.filter(g => g.netAmount < 0);
+  const youAreOwed = groupedSettlements.filter(g => g.netAmount > 0);
+
+  const totalYouOwe = youOwe.reduce((sum, g) => sum + Math.abs(g.netAmount), 0);
+  const totalOwedToYou = youAreOwed.reduce((sum, g) => sum + g.netAmount, 0);
+
+  // Payment mutation (creates payment link and opens it)
+  const paymentMutation = useMutation({
+    mutationFn: async (data: { userId: string; amount: number; settlementIds: string[] }) => {
+      // Call payment_notification to get payment URL
+      const response = await herokuApiRequest<{ payment_url: string }>(
+        "POST",
+        "/payment_notification",
+        { user_id: data.userId, amount: data.amount }
+      );
+      
+      // Open payment URL in Telegram
+      if (response.payment_url) {
+        WebApp.openLink(response.payment_url);
+      }
+      
+      // Mark all settlements as paid
+      await Promise.all(
+        data.settlementIds.map(id => 
+          herokuApiRequest("POST", `/settle/${id}`)
+        )
+      );
+      
+      return response;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/splits"] });
+      queryClient.invalidateQueries({ queryKey: ["settlements", userId] });
+      queryClient.invalidateQueries({ queryKey: ["transactions", userId] });
       toast({
-        title: "Payment completed!",
-        description: "Your settlement has been recorded",
+        title: "Payment link opened!",
+        description: "Complete payment in the new tab and transaction will be marked as settled",
       });
     },
-    onError: () => {
+    onError: (error: any) => {
       toast({
-        title: "Settlement failed",
-        description: "Please try again",
+        title: "Payment failed",
+        description: error.message || "Please try again",
         variant: "destructive",
       });
     },
   });
 
-  const handlePayment = (debt: DebtWithExpense) => {
-    setSelectedDebt(debt);
-    setShowTonModal(true);
+  const handlePayment = async (group: GroupedSettlement) => {
+    if (!userId) return;
+    
+    await paymentMutation.mutateAsync({
+      userId,
+      amount: Math.abs(group.netAmount),
+      settlementIds: group.settlementIds,
+    });
   };
 
-  const handleRequest = (debt: DebtWithExpense) => {
-    setSelectedDebt(debt);
+  const handleRequest = (group: GroupedSettlement) => {
+    setSelectedGroup(group);
     setShowRequestModal(true);
   };
 
-  const confirmPayment = async () => {
-    if (!selectedDebt) return;
-
-    await settleMutation.mutateAsync({
-      splitId: selectedDebt.id,
-      amount: selectedDebt.amount,
-    });
-
-    setSelectedDebt(null);
-    setShowTonModal(false);
-  };
-
   const confirmRequest = () => {
-    if (!selectedDebt) return;
+    if (!selectedGroup) return;
 
     toast({
       title: "Payment request sent!",
-      description: `Request sent to ${selectedDebt.from} for ${formatCurrency(selectedDebt.amount - selectedDebt.settled)}`,
+      description: `Request sent for ${formatCurrency(Math.abs(selectedGroup.netAmount))}`,
     });
 
-    setSelectedDebt(null);
+    setSelectedGroup(null);
     setShowRequestModal(false);
   };
 
-  const totalYouOwe = youOwe.reduce((sum, d) => sum + (d.amount - d.settled), 0);
-  const totalOwedToYou = youAreOwed.reduce((sum, d) => sum + (d.amount - d.settled), 0);
-
-  const renderDebtCard = (debt: DebtWithExpense, isOwed: boolean) => {
-    const unsettled = debt.amount - debt.settled;
-    const hasImage = !!debt.expense.imageUrl;
-    const otherPerson = isOwed ? debt.from : debt.to;
+  const renderGroupCard = (group: GroupedSettlement, isOwed: boolean) => {
+    const netAmount = Math.abs(group.netAmount);
 
     return (
-      <Card key={debt.id} className="hover-elevate" data-testid={`debt-card-${debt.id}`}>
+      <Card key={group.personId} className="hover-elevate" data-testid={`settlement-card-${group.personId}`}>
         <CardContent className="p-4">
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex items-start gap-3 min-w-0 flex-1">
-              <Avatar className={cn("h-12 w-12 mt-1", getColorFromString(otherPerson))}>
+          <div className="flex items-start justify-between gap-4 mb-3">
+            <div className="flex items-center gap-3 flex-1 min-w-0">
+              <Avatar className={cn("h-10 w-10", getColorFromString(group.personName))}>
                 <AvatarFallback className="text-white font-semibold">
-                  {getInitials(otherPerson)}
+                  {getInitials(group.personName)}
                 </AvatarFallback>
               </Avatar>
               
               <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2 mb-1">
-                  <p className="font-semibold truncate">{otherPerson}</p>
-                  <div className="flex-shrink-0">
-                    {hasImage ? (
-                      <Image className="h-4 w-4 text-muted-foreground" data-testid="icon-image" />
-                    ) : (
-                      <Mic className="h-4 w-4 text-muted-foreground" data-testid="icon-voice" />
-                    )}
-                  </div>
-                </div>
-                
-                <p className="text-sm font-medium text-foreground truncate mb-1">
-                  {debt.expense.description || debt.expense.category}
+                <p className="font-bold text-lg truncate">{group.personName}</p>
+                <p className="text-xs text-muted-foreground">
+                  {group.items.length} {group.items.length === 1 ? 'item' : 'items'}
                 </p>
-                
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <span>{formatDate(debt.expense.createdAt)}</span>
-                  <span>•</span>
-                  <span>{debt.expense.category}</span>
-                </div>
               </div>
             </div>
 
+            {/* Net Amount */}
             <div className="flex flex-col items-end gap-2 flex-shrink-0">
-              <div className="text-right">
-                <p className={cn(
-                  "text-xl font-bold font-mono tabular-nums",
-                  isOwed ? "text-chart-2" : "text-destructive"
-                )} data-testid={`text-amount-${debt.id}`}>
-                  {formatCurrency(unsettled)}
-                </p>
-              </div>
+              <p className={cn(
+                "text-2xl font-bold font-mono tabular-nums",
+                isOwed ? "text-chart-2" : "text-destructive"
+              )} data-testid={`text-net-amount-${group.personId}`}>
+                {formatCurrency(netAmount)}
+              </p>
               
               {isOwed ? (
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => handleRequest(debt)}
+                  onClick={() => handleRequest(group)}
                   className="w-full"
-                  data-testid={`button-request-${debt.id}`}
+                  data-testid={`button-request-${group.personId}`}
                 >
                   <Send className="h-3 w-3 mr-1" />
                   Request
@@ -167,9 +257,10 @@ export default function Settle() {
               ) : (
                 <Button
                   size="sm"
-                  onClick={() => handlePayment(debt)}
+                  onClick={() => handlePayment(group)}
                   className="w-full"
-                  data-testid={`button-pay-${debt.id}`}
+                  disabled={paymentMutation.isPending}
+                  data-testid={`button-pay-${group.personId}`}
                 >
                   <Wallet className="h-3 w-3 mr-1" />
                   Pay
@@ -177,10 +268,59 @@ export default function Settle() {
               )}
             </div>
           </div>
+
+          <Separator className="mb-3" />
+
+          {/* Item Breakdown */}
+          <div className="space-y-2">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              Items
+            </p>
+            {group.items.map((item) => {
+              const iconName = getCategoryIcon(item.category);
+              const IconComponent = iconComponents[iconName] || MoreHorizontal;
+              const categoryColor = getCategoryColor(item.category);
+
+              return (
+                <div key={item.id} className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                    <div 
+                      className="flex-shrink-0 h-6 w-6 rounded-full flex items-center justify-center"
+                      style={{ backgroundColor: categoryColor + '20' }}
+                    >
+                      <IconComponent className="h-3 w-3" style={{ color: categoryColor }} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm truncate">{item.name}</p>
+                      <p className="text-xs text-muted-foreground">{item.category}</p>
+                    </div>
+                  </div>
+                  <p className={cn(
+                    "text-sm font-mono tabular-nums flex-shrink-0",
+                    item.direction === 'owed_to_me' ? "text-chart-2" : "text-destructive"
+                  )}>
+                    {item.direction === 'owed_to_me' ? '+' : '-'}{formatCurrency(item.amount)}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
         </CardContent>
       </Card>
     );
   };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-background pb-24">
+        <div className="max-w-2xl mx-auto px-4 py-6">
+          <div className="text-center py-16">
+            <p className="text-muted-foreground">Loading settlements...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background pb-24">
@@ -203,7 +343,7 @@ export default function Settle() {
                 {formatCurrency(totalYouOwe)}
               </p>
               <p className="text-xs text-muted-foreground mt-1">
-                {youOwe.length} {youOwe.length === 1 ? 'debt' : 'debts'}
+                {youOwe.length} {youOwe.length === 1 ? 'person' : 'people'}
               </p>
             </CardContent>
           </Card>
@@ -215,7 +355,7 @@ export default function Settle() {
                 {formatCurrency(totalOwedToYou)}
               </p>
               <p className="text-xs text-muted-foreground mt-1">
-                {youAreOwed.length} {youAreOwed.length === 1 ? 'payment' : 'payments'}
+                {youAreOwed.length} {youAreOwed.length === 1 ? 'person' : 'people'}
               </p>
             </CardContent>
           </Card>
@@ -231,7 +371,7 @@ export default function Settle() {
               </Badge>
             </h2>
             <div className="space-y-3">
-              {youOwe.map((debt) => renderDebtCard(debt, false))}
+              {youOwe.map((group) => renderGroupCard(group, false))}
             </div>
           </div>
         )}
@@ -246,7 +386,7 @@ export default function Settle() {
               </Badge>
             </h2>
             <div className="space-y-3">
-              {youAreOwed.map((debt) => renderDebtCard(debt, true))}
+              {youAreOwed.map((group) => renderGroupCard(group, true))}
             </div>
           </div>
         )}
@@ -301,28 +441,14 @@ export default function Settle() {
         </Card>
       </div>
 
-      {/* TON Payment Modal */}
-      <ConfirmModal
-        open={showTonModal}
-        onOpenChange={setShowTonModal}
-        title="Pay with TON"
-        description={
-          selectedDebt
-            ? `You are about to pay ${formatCurrency(selectedDebt.amount - selectedDebt.settled)} to ${selectedDebt.to} for "${selectedDebt.expense.description || selectedDebt.expense.category}" using TON cryptocurrency.`
-            : ""
-        }
-        confirmLabel="Confirm Payment"
-        onConfirm={confirmPayment}
-      />
-
       {/* Request Payment Modal */}
       <ConfirmModal
         open={showRequestModal}
         onOpenChange={setShowRequestModal}
         title="Request Payment"
         description={
-          selectedDebt
-            ? `Request ${formatCurrency(selectedDebt.amount - selectedDebt.settled)} from ${selectedDebt.from} for "${selectedDebt.expense.description || selectedDebt.expense.category}"?`
+          selectedGroup
+            ? `Request ${formatCurrency(Math.abs(selectedGroup.netAmount))} from ${selectedGroup.personName}?`
             : ""
         }
         confirmLabel="Send Request"

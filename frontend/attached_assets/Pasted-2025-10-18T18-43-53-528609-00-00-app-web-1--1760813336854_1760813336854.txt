@@ -1,0 +1,20 @@
+2025-10-18T18:43:53.528609+00:00 app[web.1]:                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2025-10-18T18:43:53.528609+00:00 app[web.1]:   File "/app/.heroku/python/lib/python3.11/site-packages/supabase_auth/_sync/gotrue_client.py", line 503, in sign_in_with_otp
+2025-10-18T18:43:53.528609+00:00 app[web.1]:     return self._request(
+2025-10-18T18:43:53.528609+00:00 app[web.1]:            ^^^^^^^^^^^^^^
+2025-10-18T18:43:53.528610+00:00 app[web.1]:   File "/app/.heroku/python/lib/python3.11/site-packages/supabase_auth/_sync/gotrue_base_api.py", line 125, in _request
+2025-10-18T18:43:53.528610+00:00 app[web.1]:     raise handle_exception(e)
+2025-10-18T18:43:53.528610+00:00 app[web.1]: supabase_auth.errors.AuthApiError: Email address "playwright-test@example.com" is invalid
+2025-10-18T18:43:53.529115+00:00 app[web.1]: 10.1.27.80 - - [18/Oct/2025:18:43:53 +0000] "POST /register HTTP/1.1" 500 265 "-" "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
+2025-10-18T18:43:58.000000+00:00 app[api]: Build started by user pshricharan2020@gmail.com
+2025-10-18T18:44:00.963584+00:00 app[worker.1]: INFO:httpx:HTTP Request: POST https://api.telegram.org/bot7651391698:AAFed15lajiauDRvyAtS4nt68koYr-4EDEI/getUpdates "HTTP/1.1 200 OK"
+2025-10-18T18:44:04.161294+00:00 heroku[router]: at=info method=GET path="/friends/00000000-0000-0000-0000-000000000000" host=splitton-ef215d77f9d0.herokuapp.com request_id=b0a06ade-6f90-1f7c-7672-1d08cdb73b23 fwd="136.117.124.241" dyno=web.1 connect=0ms service=1287ms status=200 bytes=3 protocol=http1.1 tls=true tls_version=unknown
+2025-10-18T18:44:04.160201+00:00 app[web.1]: INFO:httpx:HTTP Request: GET https://dqomvlyrrezythpqncsf.supabase.co/rest/v1/friends?select=id%2Cnickname%2Cfriend_user_id&user_id=eq.00000000-0000-0000-0000-000000000000 "HTTP/2 200 OK"
+2025-10-18T18:44:04.161223+00:00 app[web.1]: 10.1.27.80 - - [18/Oct/2025:18:44:04 +0000] "GET /friends/00000000-0000-0000-0000-000000000000 HTTP/1.1" 200 3 "-" "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
+2025-10-18T18:44:11.044054+00:00 app[worker.1]: INFO:httpx:HTTP Request: POST https://api.telegram.org/bot7651391698:AAFed15lajiauDRvyAtS4nt68koYr-4EDEI/getUpdates "HTTP/1.1 200 OK"
+2025-10-18T18:44:13.796792+00:00 heroku[router]: at=info method=GET path="/transactions/00000000-0000-0000-0000-000000000000" host=splitton-ef215d77f9d0.herokuapp.com request_id=67c19d51-d068-90f8-2382-59cc9d929b3b fwd="136.117.124.241" dyno=web.1 connect=0ms service=888ms status=200 bytes=3 protocol=http1.1 tls=true tls_version=unknown
+2025-10-18T18:44:13.795698+00:00 app[web.1]: INFO:httpx:HTTP Request: GET https://dqomvlyrrezythpqncsf.supabase.co/rest/v1/transaction_participants?select=%2A%2Ctransaction%3Atransaction_id%28%2A%29&status=eq.paid&or=%28payer_id.eq.00000000-0000-0000-0000-000000000000%2Cpayee_id.eq.00000000-0000-0000-0000-000000000000%29 "HTTP/2 200 OK"
+2025-10-18T18:44:13.796676+00:00 app[web.1]: 10.1.27.80 - - [18/Oct/2025:18:44:13 +0000] "GET /transactions/00000000-0000-0000-0000-000000000000 HTTP/1.1" 200 3 "-" "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
+2025-10-18T18:44:21.125302+00:00 app[worker.1]: INFO:httpx:HTTP Request: POST https://api.telegram.org/bot7651391698:AAFed15lajiauDRvyAtS4nt68koYr-4EDEI/getUpdates "HTTP/1.1 200 OK"
+2025-10-18T18:44:28.090868+00:00 heroku[router]: at=info method=GET path="/settlements/00000000-0000-0000-0000-000000000000" host=splitton-ef215d77f9d0.herokuapp.com request_id=648b2887-2c58-b386-e4ba-916afe31328f fwd="136.117.124.241" dyno=web.1 connect=0ms service=422ms status=200 bytes=3 protocol=http1.1 tls=true tls_version=unknown
+2025-10-18T18:44:28.089729+00:00 app[web.1]: INFO:httpx:HTTP Request: GET https://dqomvlyrrezythpqncsf.supabase.co/rest/v1/transaction_participants?select=%2A&status=eq.pending&or=%28payer_id.eq.00000000-0000-0000-0000-000000000000%2Cpayee_id.eq.00000000-0000-0000-0000-000000000000%29 "HTTP/2 200 OK"

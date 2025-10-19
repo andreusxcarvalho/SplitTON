@@ -1,0 +1,35 @@
+2025-10-18T18:44:28.090780+00:00 app[web.1]: 10.1.27.80 - - [18/Oct/2025:18:44:28 +0000] "GET /settlements/00000000-0000-0000-0000-000000000000 HTTP/1.1" 200 3 "-" "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
+2025-10-18T18:44:30.209878+00:00 heroku[web.1]: Restarting
+2025-10-18T18:44:30.261977+00:00 heroku[web.1]: State changed from up to starting
+2025-10-18T18:44:30.332755+00:00 heroku[worker.1]: Restarting
+2025-10-18T18:44:30.334684+00:00 heroku[worker.1]: State changed from up to starting
+2025-10-18T18:44:29.943514+00:00 app[api]: Deploy 5429e1d2 by user pshricharan2020@gmail.com
+2025-10-18T18:44:29.943514+00:00 app[api]: Release v21 created by user pshricharan2020@gmail.com
+2025-10-18T18:44:30.984766+00:00 heroku[worker.1]: Stopping all processes with SIGTERM
+2025-10-18T18:44:31.040890+00:00 heroku[web.1]: Stopping all processes with SIGTERM
+2025-10-18T18:44:31.058468+00:00 app[web.1]: [2025-10-18 18:44:31 +0000] [10] [INFO] Worker exiting (pid: 10)
+2025-10-18T18:44:31.058495+00:00 app[web.1]: [2025-10-18 18:44:31 +0000] [9] [INFO] Worker exiting (pid: 9)
+2025-10-18T18:44:31.058499+00:00 app[web.1]: [2025-10-18 18:44:31 +0000] [2] [INFO] Handling signal: term
+2025-10-18T18:44:31.066057+00:00 app[web.1]: [2025-10-18 18:44:31 +0000] [2] [ERROR] Worker (pid:10) was sent SIGTERM!
+2025-10-18T18:44:31.259015+00:00 app[web.1]: [2025-10-18 18:44:31 +0000] [2] [INFO] Shutting down: Master
+2025-10-18T18:44:31.326463+00:00 heroku[web.1]: Process exited with status 0
+2025-10-18T18:44:31.265645+00:00 app[worker.1]: INFO:httpx:HTTP Request: POST https://api.telegram.org/bot7651391698:AAFed15lajiauDRvyAtS4nt68koYr-4EDEI/getUpdates "HTTP/1.1 200 OK"
+2025-10-18T18:44:31.266052+00:00 app[worker.1]: INFO:telegram.ext.Application:Application is stopping. This might take a moment.
+2025-10-18T18:44:31.266121+00:00 app[worker.1]: INFO:telegram.ext.Application:Application.stop() complete
+2025-10-18T18:44:31.416927+00:00 heroku[worker.1]: Process exited with status 0
+2025-10-18T18:44:34.000000+00:00 app[api]: Build succeeded
+2025-10-18T18:44:36.941766+00:00 heroku[web.1]: Starting process with command `gunicorn --chdir backend server:app`
+2025-10-18T18:44:37.267627+00:00 heroku[worker.1]: Starting process with command `python backend/bot.py`
+2025-10-18T18:44:37.615413+00:00 app[web.1]: Python buildpack: Detected 512 MB available memory and 8 CPU cores.
+2025-10-18T18:44:37.615506+00:00 app[web.1]: Python buildpack: Defaulting WEB_CONCURRENCY to 2 based on the available memory.
+2025-10-18T18:44:37.724518+00:00 app[web.1]: [2025-10-18 18:44:37 +0000] [2] [INFO] Starting gunicorn 23.0.0
+2025-10-18T18:44:37.724780+00:00 app[web.1]: [2025-10-18 18:44:37 +0000] [2] [INFO] Listening at: http://0.0.0.0:18822 (2)
+2025-10-18T18:44:37.724814+00:00 app[web.1]: [2025-10-18 18:44:37 +0000] [2] [INFO] Using worker: sync
+2025-10-18T18:44:37.727005+00:00 app[web.1]: [2025-10-18 18:44:37 +0000] [9] [INFO] Booting worker with pid: 9
+2025-10-18T18:44:37.813443+00:00 app[web.1]: [2025-10-18 18:44:37 +0000] [10] [INFO] Booting worker with pid: 10
+2025-10-18T18:44:37.898496+00:00 heroku[worker.1]: State changed from starting to up
+2025-10-18T18:44:38.068445+00:00 heroku[web.1]: State changed from starting to up
+2025-10-18T18:44:38.989835+00:00 app[worker.1]: INFO:__main__:Bot starting (polling mode)...
+2025-10-18T18:44:39.255530+00:00 app[worker.1]: INFO:httpx:HTTP Request: POST https://api.telegram.org/bot7651391698:AAFed15lajiauDRvyAtS4nt68koYr-4EDEI/getMe "HTTP/1.1 200 OK"
+2025-10-18T18:44:39.341300+00:00 app[worker.1]: INFO:httpx:HTTP Request: POST https://api.telegram.org/bot7651391698:AAFed15lajiauDRvyAtS4nt68koYr-4EDEI/deleteWebhook "HTTP/1.1 200 OK"
+2025-10-18T18:44:39.342335+00:00 app[worker.1]: INFO:telegram.ext.Application:Application started

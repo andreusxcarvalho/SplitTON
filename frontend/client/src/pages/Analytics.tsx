@@ -1,34 +1,50 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { TrendingUp, Calendar } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CategoryChart } from "@/components/CategoryChart";
-import { useExpenseStore } from "@/state/store";
 import { formatCurrency, getCategoryIcon } from "@/lib/utils";
-import type { Expense } from "@shared/schema";
+import { apiRequest as herokuApiRequest, getCurrentUserId } from "@/lib/api";
 
 type TimeFilter = "week" | "month" | "year";
 
+interface CategoryBreakdown {
+  [category: string]: number;
+}
+
 export default function Analytics() {
   const [timeFilter, setTimeFilter] = useState<TimeFilter>("month");
+  const userId = getCurrentUserId();
 
-  const { data: expenses } = useQuery<Expense[]>({
-    queryKey: ["/api/expenses"],
+  const { data: statsData, isLoading } = useQuery<CategoryBreakdown>({
+    queryKey: ["stats", userId],
+    queryFn: async () => {
+      if (!userId) return {};
+      return await herokuApiRequest<CategoryBreakdown>("GET", `/stats/${userId}`);
+    },
+    enabled: !!userId,
+    refetchOnWindowFocus: true,  // Auto-refresh when Mini App reopens
+    staleTime: 30000,  // Consider data fresh for 30 seconds
   });
 
-  const setExpenses = useExpenseStore((state) => state.setExpenses);
-  const getCategoryBreakdown = useExpenseStore((state) => state.getCategoryBreakdown);
+  // Convert server data to chart format for CategoryChart
+  const CATEGORY_COLORS = [
+    "hsl(var(--chart-1))",
+    "hsl(var(--chart-2))",
+    "hsl(var(--chart-3))",
+    "hsl(var(--chart-4))",
+    "hsl(var(--chart-5))",
+  ];
+  
+  const categoryData = Object.entries(statsData || {}).map(([category, amount], idx) => ({
+    name: category,
+    value: amount,
+    color: CATEGORY_COLORS[idx % CATEGORY_COLORS.length],
+  }));
 
-  // Sync API data to store
-  useEffect(() => {
-    if (expenses) setExpenses(expenses);
-  }, [expenses, setExpenses]);
-
-  const categoryData = getCategoryBreakdown();
-
-  const totalSpent = expenses?.reduce((sum, exp) => sum + exp.total, 0) || 0;
-  const averageExpense = expenses && expenses.length > 0 ? totalSpent / expenses.length : 0;
+  const totalSpent = Object.values(statsData || {}).reduce((sum, amount) => sum + amount, 0);
+  const averageExpense = categoryData.length > 0 ? totalSpent / categoryData.length : 0;
 
   // Mock trend data
   const trend = 12; // 12% increase
@@ -102,11 +118,11 @@ export default function Analytics() {
 
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm text-muted-foreground">Total Expenses</CardTitle>
+              <CardTitle className="text-sm text-muted-foreground">Categories</CardTitle>
             </CardHeader>
             <CardContent>
               <p className="text-2xl font-bold font-mono tabular-nums" data-testid="text-expense-count">
-                {expenses?.length || 0}
+                {categoryData.length || 0}
               </p>
             </CardContent>
           </Card>

@@ -1,10 +1,9 @@
-import "dotenv/config";
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import multer from "multer";
 import OpenAI from "openai";
 import { storage } from "./storage";
-import { insertExpenseSchema } from "@shared/schema";
+import { insertExpenseSchema, insertSplitSchema, insertFriendSchema } from "@shared/schema";
 import { z } from "zod";
 import { setupAuth } from "./auth";
 
@@ -14,17 +13,17 @@ const upload = multer({
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
 });
 
-// Initialize OpenAI using environment variables
+// Initialize OpenAI with Replit AI Integrations
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
-  baseURL: process.env.OPENAI_BASE_URL || "https://api.openai.com/v1",
+  baseURL: process.env.OPENAI_BASE_URL,
 });
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  // Setup authentication
+  // Setup authentication (blueprint:javascript_auth_all_persistance)
   setupAuth(app);
 
-  // Parse receipt using OpenAI Vision
+  // Parse receipt with OpenAI Vision
   app.post("/api/parse-receipt", upload.single("receipt"), async (req, res) => {
     try {
       if (!req.file) {
@@ -68,59 +67,22 @@ Respond in JSON format:
         max_tokens: 500,
       });
 
-      const content = response.choices[0]?.message?.content;
+      const content = response.choices[0].message.content;
       if (!content) {
         return res.status(500).json({ error: "Failed to parse receipt" });
       }
 
-      // Extract JSON safely
+      // Extract JSON from response
       const jsonMatch = content.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
         return res.status(500).json({ error: "Invalid response format" });
       }
 
-      let result;
-      try {
-        result = JSON.parse(jsonMatch[0]);
-      } catch {
-        return res.status(500).json({ error: "Failed to parse JSON" });
-      }
-
+      const result = JSON.parse(jsonMatch[0]);
       res.json(result);
     } catch (error) {
       console.error("Receipt parsing error:", error);
       res.status(500).json({ error: "Failed to parse receipt" });
-    }
-  });
-
-  // Transcribe audio using OpenAI Whisper
-  app.post("/api/transcribe-audio", upload.single("audio"), async (req, res) => {
-    try {
-      if (!req.file) {
-        return res.status(400).json({ error: "No audio file provided" });
-      }
-
-      // Convert audio to a format that OpenAI Whisper can process
-      const audioFile = new File([req.file.buffer], "recording.webm", {
-        type: req.file.mimetype,
-      });
-
-      const transcription = await openai.audio.transcriptions.create({
-        file: audioFile,
-        model: "whisper-1",
-        language: "en", // You could make this configurable
-      });
-
-      res.json({
-        transcript: transcription.text,
-        confidence: 95, // Whisper doesn't provide confidence scores, so we use a high default
-      });
-    } catch (error) {
-      console.error("Audio transcription error:", error);
-      res.status(500).json({ 
-        error: "Failed to transcribe audio",
-        details: error instanceof Error ? error.message : "Unknown error"
-      });
     }
   });
 
@@ -141,8 +103,10 @@ Respond in JSON format:
       const validatedData = insertExpenseSchema.parse(req.body);
       const expense = await storage.createExpense(validatedData);
 
+      // Calculate equal split
       const splitAmount = expense.total / expense.participants.length;
 
+      // Create splits for everyone who isn't the payer
       const splits = await Promise.all(
         expense.participants
           .filter((participant) => participant !== expense.payer)
@@ -197,6 +161,55 @@ Respond in JSON format:
     } catch (error) {
       console.error("Update split error:", error);
       res.status(500).json({ error: "Failed to update split" });
+    }
+  });
+
+  // Get friends for a user
+  app.get("/api/friends", async (req, res) => {
+    try {
+      const { userEmail } = req.query;
+      
+      if (!userEmail || typeof userEmail !== "string") {
+        return res.status(400).json({ error: "User email is required" });
+      }
+
+      const friends = await storage.getFriends(userEmail);
+      res.json(friends);
+    } catch (error) {
+      console.error("Get friends error:", error);
+      res.status(500).json({ error: "Failed to fetch friends" });
+    }
+  });
+
+  // Add a friend
+  app.post("/api/friends", async (req, res) => {
+    try {
+      const validatedData = insertFriendSchema.parse(req.body);
+      const friend = await storage.createFriend(validatedData);
+      res.json(friend);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: error.errors });
+      }
+      console.error("Create friend error:", error);
+      res.status(500).json({ error: "Failed to add friend" });
+    }
+  });
+
+  // Delete a friend
+  app.delete("/api/friends/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const deleted = await storage.deleteFriend(id);
+      
+      if (!deleted) {
+        return res.status(404).json({ error: "Friend not found" });
+      }
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Delete friend error:", error);
+      res.status(500).json({ error: "Failed to delete friend" });
     }
   });
 
